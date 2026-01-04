@@ -12,21 +12,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Virtual environments
-venv/
-env/
-ENV/
-.venv
-
-# IDE
-.vscode/
-.idea/
-*.swp
-
-# OS
-.DS_Store
-Thumbs.db
-
 # Generated files
 import_calendar.ics
 master_calendar.ics
