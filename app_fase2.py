@@ -23,7 +23,7 @@ import hashlib
 load_dotenv()
 
 # Inicializar Flask
-app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
+app = Flask(__name__, template_folder='templates', static_folder='static')
 CORS(app)
 
 # Configuração
