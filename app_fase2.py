@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 Calendário Sync - Fase 2: Aplicação Web Flask
 Interface segura para disparar sincronização de calendários via GitHub Actions
@@ -38,8 +39,9 @@ WEB_USERNAME = os.getenv('WEB_USERNAME', 'admin')
 WEB_PASSWORD = os.getenv('WEB_PASSWORD', 'admin123')
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 GITHUB_REPO = os.getenv('GITHUB_REPO')
-GITHUB_WORKFLOW_ID = os.getenv('GITHUB_WORKFLOW_ID', 'sync-calendars')
+GITHUB_WORKFLOW_ID = os.getenv('GITHUB_WORKFLOW_ID', 'full_auto_workflow.yml')
 GITHUB_BRANCH = os.getenv('GITHUB_BRANCH', 'main')
+GITHUB_OWNER = os.getenv('GITHUB_OWNER')
 
 # Headers GitHub
 GITHUB_HEADERS = {
@@ -134,6 +136,7 @@ def trigger_workflow():
         
         # Dados para GitHub API
         api_url = f'https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/{GITHUB_WORKFLOW_ID}/dispatches'
+        
         payload = {
             'ref': GITHUB_BRANCH,
             'inputs': {
@@ -180,7 +183,7 @@ def workflow_status():
         if not GITHUB_TOKEN or not GITHUB_REPO:
             return json_error(400, 'GitHub não configurado')
         
-        # Obter último run
+        # URL da API GitHub para workflows
         api_url = f'https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/{GITHUB_WORKFLOW_ID}/runs?per_page=1'
         
         response = requests.get(
@@ -190,27 +193,37 @@ def workflow_status():
         )
         
         if response.status_code != 200:
-            return json_error(response.status_code, 'Erro ao obter status')
+            return json_error(response.status_code, 'Erro ao obter status do workflow')
         
         data = response.json()
-        runs = data.get('workflow_runs', [])
         
-        if not runs:
+        if not data.get('workflow_runs'):
             return jsonify({
                 'status': 'no_runs',
-                'message': 'Nenhum workflow executado ainda'
+                'message': 'Nenhuma execução encontrada',
+                'run': None
             })
         
-        run = runs[0]
+        run = data['workflow_runs'][0]
+        
         return jsonify({
-            'id': run['id'],
-            'status': run['status'],
-            'conclusion': run.get('conclusion'),
-            'created_at': run['created_at'],
-            'updated_at': run['updated_at'],
-            'html_url': run['html_url']
+            'status': 'success',
+            'run': {
+                'id': run['id'],
+                'status': run['status'],
+                'conclusion': run.get('conclusion'),
+                'name': run['name'],
+                'created_at': run['created_at'],
+                'updated_at': run['updated_at'],
+                'run_number': run['run_number'],
+                'html_url': run['html_url']
+            }
         })
     
+    except requests.exceptions.Timeout:
+        return json_error(504, 'Timeout na requisição GitHub')
+    except requests.exceptions.ConnectionError:
+        return json_error(503, 'Erro de conexão com GitHub')
     except Exception as e:
         app.logger.error(f'Erro ao obter status: {str(e)}')
         return json_error(500, f'Erro interno: {str(e)}')
@@ -218,12 +231,17 @@ def workflow_status():
 @app.route('/api/workflow-history', methods=['GET'])
 @login_required
 def workflow_history():
-    """Obter histórico de workflows"""
+    """Obter histórico de execuções do workflow"""
     try:
         if not GITHUB_TOKEN or not GITHUB_REPO:
             return json_error(400, 'GitHub não configurado')
         
+        # Parâmetros
         limit = request.args.get('limit', 10, type=int)
+        if limit > 100:
+            limit = 100  # Limite máximo
+        
+        # URL da API GitHub para workflows
         api_url = f'https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/{GITHUB_WORKFLOW_ID}/runs?per_page={limit}'
         
         response = requests.get(
@@ -236,59 +254,61 @@ def workflow_history():
             return json_error(response.status_code, 'Erro ao obter histórico')
         
         data = response.json()
-        runs = data.get('workflow_runs', [])
         
-        # Formatar resposta
-        history = [
-            {
+        runs = []
+        for run in data.get('workflow_runs', []):
+            runs.append({
                 'id': run['id'],
+                'run_number': run['run_number'],
                 'status': run['status'],
                 'conclusion': run.get('conclusion'),
+                'name': run['name'],
                 'created_at': run['created_at'],
                 'updated_at': run['updated_at'],
-                'html_url': run['html_url'],
-                'duration': (
-                    (datetime.fromisoformat(run['updated_at'].replace('Z', '+00:00')) -
-                     datetime.fromisoformat(run['created_at'].replace('Z', '+00:00'))).total_seconds()
-                    if run['status'] == 'completed' else None
-                )
-            }
-            for run in runs
-        ]
+                'html_url': run['html_url']
+            })
         
-        return jsonify({'history': history, 'total': len(history)})
+        return jsonify({
+            'status': 'success',
+            'total_count': data.get('total_count', len(runs)),
+            'runs': runs
+        })
     
+    except requests.exceptions.Timeout:
+        return json_error(504, 'Timeout na requisição GitHub')
+    except requests.exceptions.ConnectionError:
+        return json_error(503, 'Erro de conexão com GitHub')
     except Exception as e:
         app.logger.error(f'Erro ao obter histórico: {str(e)}')
         return json_error(500, f'Erro interno: {str(e)}')
 
 # ============================================================================
-# ROTAS: API - HEALTH CHECK
+# ROTAS: ERROR HANDLERS
 # ============================================================================
 
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Health check da aplicação"""
+@app.errorhandler(404)
+def not_found(error):
+    """Página 404"""
+    return json_error(404, 'Rota não encontrada'), 404
+
+@app.errorhandler(500)
+def server_error(error):
+    """Página 500"""
+    app.logger.error(f'Erro interno do servidor: {str(error)}')
+    return json_error(500, 'Erro interno do servidor'), 500
+
+# ============================================================================
+# HEALTH CHECK
+# ============================================================================
+
+@app.route('/health', methods=['GET'])
+def health():
+    """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
         'github_configured': bool(GITHUB_TOKEN and GITHUB_REPO)
-    })
-
-# ============================================================================
-# TRATAMENTO DE ERROS
-# ============================================================================
-
-@app.errorhandler(404)
-def not_found(e):
-    """Erro 404"""
-    return jsonify({'error': 'Página não encontrada', 'status': 404}), 404
-
-@app.errorhandler(500)
-def internal_error(e):
-    """Erro 500"""
-    app.logger.error(f'Erro interno: {str(e)}')
-    return jsonify({'error': 'Erro interno do servidor', 'status': 500}), 500
+    }), 200
 
 # ============================================================================
 # MAIN
@@ -296,22 +316,18 @@ def internal_error(e):
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
-    debug = os.getenv('DEBUG', 'False') == 'True'
+    debug = os.getenv('FLASK_ENV', 'production') == 'development'
     
     print(f"""
-    ╔════════════════════════════════════════════════════════════╗
-    ║        Calendário Sync - Fase 2 (Web Interface)           ║
-    ╠════════════════════════════════════════════════════════════╣
-    ║  Status: Iniciando...                                      ║
-    ║  URL:    http://localhost:{port}                            ║
-    ║  Debug:  {debug}                                          ║
-    ║  GitHub: {'Configurado' if GITHUB_TOKEN else 'NÃO configurado'}                                    ║
-    ╚════════════════════════════════════════════════════════════╝
-    """)
+╔════════════════════════════════════════════════════════════╗
+║ Calendário Sync - Fase 2 (Web Interface)                  ║
+╠════════════════════════════════════════════════════════════╣
+║ Status: Iniciando...                                       ║
+║ URL: http://localhost:{port}                              ║
+║ Debug: {str(debug):5}                                        ║
+║ GitHub: {'Configurado' if GITHUB_TOKEN else 'NÃO configurado':22} ║
+╚════════════════════════════════════════════════════════════╝
+""")
     
     # Iniciar servidor
-    if debug:
-        app.run(host='0.0.0.0', port=port, debug=True)
-    else:
-        # Em produção, usar gunicorn
-        app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=debug)
