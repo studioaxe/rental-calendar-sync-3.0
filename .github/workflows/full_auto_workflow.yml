@@ -6,6 +6,17 @@ on:
     - cron: '0 0,6,12,18 * * *'
   # Permite execução manual
   workflow_dispatch:
+    inputs:
+      triggered_by:
+        description: 'Usuario que disparou a sincronizacao'
+        required: false
+        default: 'auto'
+        type: string
+      timestamp:
+        description: 'Timestamp da requisicao'
+        required: false
+        default: ''
+        type: string
 
 jobs:
   sync-calendars:
@@ -92,11 +103,11 @@ jobs:
           git add master_calendar.ics
           
           echo "=== Git Diff ==="
-          git diff --cached master_calendar.ics
+          git diff --cached master_calendar.ics | head -20
           echo ""
           
           echo "=== Fazendo commit ==="
-          if git commit -m "🗓️ Auto-sync: master_calendar.ics atualizado - $(date '+%d/%m/%Y %H:%M:%S')"; then
+          if git commit -m "🗓️ Auto-sync: master_calendar.ics atualizado - $(date '+%d/%m/%Y %H:%M:%S') - Disparado por: ${{ github.event.inputs.triggered_by || 'schedule' }}"; then
             echo "✅ Commit realizado com sucesso"
             
             echo ""
@@ -160,6 +171,7 @@ jobs:
             Run ID: ${{ github.run_id }}
             Branch: main
             Commit: ${{ github.sha }}
+            Disparado por: ${{ github.event.inputs.triggered_by || 'schedule' }}
 
             Próximo passo: Aguardar sincronização automática das plataformas de reserva
 
@@ -213,6 +225,7 @@ jobs:
           echo "Status: ${{ steps.sync.outcome }}"
           echo "Git Commit Status: ${{ steps.git_commit.outputs.commit_status }}"
           echo "Run ID: ${{ github.run_id }}"
+          echo "Disparado por: ${{ github.event.inputs.triggered_by || 'schedule' }}"
           echo ""
           echo "=== LOG SUMMARY ==="
           tail -20 sync.log || echo "Sem log disponível"
