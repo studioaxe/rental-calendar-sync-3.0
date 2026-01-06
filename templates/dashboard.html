@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Rental Calendar Sync{% endblock %}
+{% block title %}Dashboard - Rental Calendar Sync By PBrandão{% endblock %}
 
 {% block content %}
 <style>
@@ -502,7 +502,7 @@
         btn.innerHTML = '<span class="spinner"></span> A disparar...';
         statusDiv.innerHTML = '';
 
-        fetch('/trigger-sync', {
+        fetch('/api/trigger-workflow', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
