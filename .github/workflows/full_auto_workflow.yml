@@ -63,7 +63,7 @@ jobs:
           path: sync.log
           retention-days: 30
 
-      # ==================== GIT COMMIT (COM -f FORCE) ====================
+      # ==================== GIT COMMIT ====================
 
       - name: 🔧 Configure Git
         if: steps.sync.outcome == 'success'
@@ -71,12 +71,12 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      - name: 📝 Commit and Push master_calendar.ics (Force)
+      - name: 📝 Commit and Push master_calendar.ics
         if: steps.sync.outcome == 'success'
         run: |
           if [ -f master_calendar.ics ]; then
-            # Força adicionar o ficheiro mesmo estando em .gitignore
-            git add -f master_calendar.ics
+            # Adicionar ficheiro (agora público e versionado)
+            git add master_calendar.ics
             git commit -m "🗓️ Auto-sync: master_calendar.ics atualizado - $(date '+%d/%m/%Y %H:%M:%S')" || true
             git push origin main || true
             echo "✅ master_calendar.ics committed e pushed com sucesso!"
