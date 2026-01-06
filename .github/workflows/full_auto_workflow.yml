@@ -73,15 +73,45 @@ jobs:
 
       - name: 📝 Commit and Push master_calendar.ics
         if: steps.sync.outcome == 'success'
+        id: git_commit
         run: |
-          if [ -f master_calendar.ics ]; then
-            # Adicionar ficheiro (agora público e versionado)
-            git add master_calendar.ics
-            git commit -m "🗓️ Auto-sync: master_calendar.ics atualizado - $(date '+%d/%m/%Y %H:%M:%S')" || true
-            git push origin main || true
-            echo "✅ master_calendar.ics committed e pushed com sucesso!"
+          echo "=== Verificando ficheiro ==="
+          if [ ! -f master_calendar.ics ]; then
+            echo "❌ ERRO: Ficheiro master_calendar.ics não encontrado!"
+            exit 1
+          fi
+          
+          ls -lh master_calendar.ics
+          echo ""
+          
+          echo "=== Git Status ==="
+          git status
+          echo ""
+          
+          echo "=== Adicionando ficheiro ==="
+          git add master_calendar.ics
+          
+          echo "=== Git Diff ==="
+          git diff --cached master_calendar.ics
+          echo ""
+          
+          echo "=== Fazendo commit ==="
+          if git commit -m "🗓️ Auto-sync: master_calendar.ics atualizado - $(date '+%d/%m/%Y %H:%M:%S')"; then
+            echo "✅ Commit realizado com sucesso"
+            
+            echo ""
+            echo "=== Fazendo push ==="
+            if git push origin main; then
+              echo "✅ Push realizado com sucesso"
+              echo "commit_status=success" >> $GITHUB_OUTPUT
+            else
+              echo "❌ ERRO: Push falhou"
+              echo "commit_status=push_failed" >> $GITHUB_OUTPUT
+              exit 1
+            fi
           else
-            echo "⚠️ Ficheiro master_calendar.ics não encontrado"
+            echo "⚠️  Nenhuma mudança para commit (ficheiro já estava atualizado)"
+            echo "commit_status=no_changes" >> $GITHUB_OUTPUT
           fi
 
       # ==================== PREPARAR VARIÁVEIS PARA EMAIL ====================
@@ -97,7 +127,7 @@ jobs:
       # ==================== EMAIL SUCESSO ====================
 
       - name: 📧 Send Success Email
-        if: steps.sync.outcome == 'success'
+        if: steps.sync.outcome == 'success' && steps.git_commit.outputs.commit_status == 'success'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: ${{ secrets.EMAIL_SERVER }}
@@ -121,7 +151,7 @@ jobs:
             • Booking: ✅
             • Vrbo: ✅
 
-            📁 Ficheiros Atualizados Online
+            📁 Ficheiro Atualizado no Repositório
 
             🔗 Link do Repositório:
             ${{ github.server_url }}/${{ github.repository }}
@@ -137,14 +167,14 @@ jobs:
 
       - name: 📅 Set Date/Timestamp Variables (Error)
         id: datetime_error
-        if: steps.sync.outcome == 'failure'
+        if: failure()
         run: |
           echo "current_date=$(date '+%d/%m/%Y às %H:%M:%S')" >> $GITHUB_OUTPUT
           echo "current_timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
           echo "run_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_OUTPUT
 
       - name: 📧 Send Error Email
-        if: steps.sync.outcome == 'failure'
+        if: failure()
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: ${{ secrets.EMAIL_SERVER }}
@@ -171,7 +201,7 @@ jobs:
             $(cat sync.log 2>/dev/null || echo "Log não disponível")
             ---END---
 
-            ⚠️ Ação necessária: Verifique URLs e configurações
+            ⚠️ Ação necessária: Verifique o log da execução
 
       # ==================== ESTATÍSTICAS ====================
 
@@ -181,6 +211,7 @@ jobs:
           echo "=== SINCRONIZAÇÃO STATISTICS ==="
           echo "Data/Hora: $(date '+%d/%m/%Y %H:%M:%S')"
           echo "Status: ${{ steps.sync.outcome }}"
+          echo "Git Commit Status: ${{ steps.git_commit.outputs.commit_status }}"
           echo "Run ID: ${{ github.run_id }}"
           echo ""
           echo "=== LOG SUMMARY ==="
