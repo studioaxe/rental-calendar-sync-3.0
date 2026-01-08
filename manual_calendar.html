@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manual Calendar Editor - Fase 3</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-color: #2d6a78;
+            --primary-light: #32b8c6;
+            --primary-dark: #1a4a52;
+            --danger-color: #c01f2f;
+            --success-color: #2d8690;
+            --warning-color: #e68159;
+            --bg-dark: #1f2121;
+            --bg-light: #fcfcf9;
+            --bg-card: #262828;
+            --text-primary: #f5f5f5;
+            --text-secondary: #a7a9a9;
+            --border-color: #5e5240;
+            --transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @media (prefers-color-scheme: light) {
+            :root {
+                --primary-color: #2d8690;
+                --bg-dark: #fcfcf9;
+                --bg-card: #ffffff;
+                --text-primary: #132034;
+                --text-secondary: #627c81;
+            }
+        }
+
+        html {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* HEADER */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 600;
+        }
+
+        .header-info {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .status-badge {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            background-color: rgba(45, 134, 144, 0.15);
+            color: var(--primary-light);
+            border: 1px solid rgba(45, 134, 144, 0.25);
+        }
+
+        /* PROGRESS BAR */
+        .progress-section {
+            margin-bottom: 30px;
+        }
+
+        .progress-label {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 12px;
+            color: var(--text-secondary);
+        }
+
+        .progress-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .progress-step {
+            background-color: var(--bg-card);
+            padding: 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            transition: var(--transition);
+        }
+
+        .progress-step.completed {
+            background-color: rgba(45, 134, 144, 0.1);
+            border-color: var(--primary-light);
+        }
+
+        .progress-step.active {
+            background-color: rgba(45, 134, 144, 0.2);
+            border-color: var(--primary-light);
+        }
+
+        .progress-step-number {
+            min-width: 32px;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background-color: rgba(167, 169, 169, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 12px;
+        }
+
+        .progress-step.completed .progress-step-number {
+            background-color: var(--primary-light);
+            color: var(--bg-dark);
+        }
+
+        .progress-step.active .progress-step-number {
+            background-color: var(--primary-light);
+            color: var(--bg-dark);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .progress-step-text {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .progress-step-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .progress-step-status {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .sync-button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            width: 100%;
+        }
+
+        .sync-button:hover:not(:disabled) {
+            background-color: var(--primary-light);
+        }
+
+        .sync-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* CALENDAR */
+        .calendar-section {
+            margin-bottom: 30px;
+        }
+
+        .calendar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .calendar-header h2 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .month-nav {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .month-nav button {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .month-nav button:hover {
+            background-color: var(--primary-color);
+        }
+
+        .month-display {
+            min-width: 150px;
+            text-align: center;
+            font-weight: 600;
+        }
+
+        .calendar-grid {
+            background-color: var(--bg-card);
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            padding: 20px;
+            overflow-x: auto;
+        }
+
+        .weekdays {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .weekday {
+            text-align: center;
+            font-weight: 600;
+            font-size: 12px;
+            color: var(--text-secondary);
+            padding: 8px;
+        }
+
+        .days {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 8px;
+        }
+
+        .day {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: var(--transition);
+            background-color: rgba(167, 169, 169, 0.05);
+            color: var(--text-primary);
+            position: relative;
+        }
+
+        .day:hover {
+            border-color: var(--primary-light);
+            background-color: rgba(45, 182, 198, 0.1);
+        }
+
+        .day.empty {
+            cursor: default;
+            opacity: 0.2;
+        }
+
+        .day.empty:hover {
+            border-color: var(--border-color);
+            background-color: transparent;
+        }
+
+        .day.selected {
+            background-color: var(--primary-light);
+            border-color: var(--primary-light);
+            color: var(--bg-dark);
+            font-weight: 600;
+        }
+
+        .day.has-event {
+            position: relative;
+        }
+
+        .day.has-event::after {
+            content: '';
+            position: absolute;
+            bottom: 4px;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background-color: currentColor;
+        }
+
+        .day.reservation {
+            background-color: rgba(192, 31, 47, 0.2);
+            border-color: rgba(192, 31, 47, 0.5);
+            color: #ff5459;
+        }
+
+        .day.manual-block {
+            background-color: rgba(230, 129, 97, 0.2);
+            border-color: rgba(230, 129, 97, 0.5);
+            color: #e68159;
+        }
+
+        .day.manual-remove {
+            background-color: rgba(192, 31, 47, 0.15);
+            border-color: rgba(192, 31, 47, 0.4);
+            color: #c01f2f;
+            text-decoration: line-through;
+        }
+
+        /* MODAL */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h3 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .modal-close:hover {
+            color: var(--text-primary);
+        }
+
+        /* FORM */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+        }
+
+        .form-input,
+        .form-select,
+        .form-textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background-color: rgba(167, 169, 169, 0.05);
+            color: var(--text-primary);
+            font-size: 14px;
+            font-family: inherit;
+            transition: var(--transition);
+        }
+
+        .form-input:focus,
+        .form-select:focus,
+        .form-textarea:focus {
+            outline: none;
+            border-color: var(--primary-light);
+            background-color: rgba(45, 182, 198, 0.05);
+        }
+
+        .form-textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .form-radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .form-radio {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+        }
+
+        .form-radio input[type="radio"] {
+            cursor: pointer;
+            width: 18px;
+            height: 18px;
+        }
+
+        /* BUTTONS */
+        .button-group {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border-radius: 6px;
+            border: none;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: var(--primary-light);
+        }
+
+        .btn-secondary {
+            background-color: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .btn-secondary:hover {
+            background-color: var(--bg-card);
+        }
+
+        .btn-danger {
+            background-color: var(--danger-color);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background-color: #a01820;
+        }
+
+        /* EVENTS LIST */
+        .events-section {
+            margin-bottom: 30px;
+        }
+
+        .events-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 16px;
+        }
+
+        .event-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            transition: var(--transition);
+        }
+
+        .event-card:hover {
+            border-color: var(--primary-light);
+        }
+
+        .event-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 12px;
+        }
+
+        .event-type-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .event-type-badge.block {
+            background-color: rgba(230, 129, 97, 0.2);
+            color: #e68159;
+        }
+
+        .event-type-badge.remove {
+            background-color: rgba(192, 31, 47, 0.2);
+            color: #c01f2f;
+        }
+
+        .event-card-date {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .event-card-description {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            line-height: 1.4;
+        }
+
+        .event-card-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .event-card-actions button {
+            flex: 1;
+            padding: 6px 10px;
+            font-size: 11px;
+            border: 1px solid var(--border-color);
+            background-color: transparent;
+            color: var(--text-primary);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .event-card-actions button:hover {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+            color: white;
+        }
+
+        /* STATS */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 28px;
+            font-weight: 600;
+            color: var(--primary-light);
+            margin-bottom: 8px;
+        }
+
+        .stat-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        /* ACTIONS */
+        .actions-section {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+
+        .actions-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+
+        .actions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+        }
+
+        .action-button {
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background-color: transparent;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .action-button:hover {
+            border-color: var(--primary-light);
+            background-color: rgba(45, 182, 198, 0.1);
+        }
+
+        .action-button-icon {
+            font-size: 20px;
+        }
+
+        /* RESPONSIVE */
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                gap: 16px;
+                align-items: flex-start;
+            }
+
+            .header-info {
+                width: 100%;
+                flex-direction: column;
+            }
+
+            .calendar-grid {
+                padding: 12px;
+            }
+
+            .weekday,
+            .day {
+                padding: 4px;
+                font-size: 12px;
+            }
+
+            .modal-content {
+                width: 95%;
+            }
+
+            .progress-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* ANIMATIONS */
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .event-card {
+            animation: slideIn 0.3s ease-out;
+        }
+
+        /* UTILITIES */
+        .mt-20 {
+            margin-top: 20px;
+        }
+
+        .mb-20 {
+            margin-bottom: 20px;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        .text-muted {
+            color: var(--text-secondary);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--text-secondary);
+            border-top-color: var(--primary-light);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- HEADER -->
+        <div class="header">
+            <div>
+                <h1>📅 Manual Calendar Editor</h1>
+            </div>
+            <div class="header-info">
+                <div class="status-badge" id="syncStatus">Pronto</div>
+            </div>
+        </div>
+
+        <!-- PROGRESS SECTION -->
+        <div class="progress-section">
+            <div class="progress-label">Sincronização do Calendário</div>
+            <div class="progress-container">
+                <div class="progress-step" id="step1">
+                    <div class="progress-step-number">1</div>
+                    <div class="progress-step-text">
+                        <div class="progress-step-title">Sincronizando</div>
+                        <div class="progress-step-status">import_calendar.ics</div>
+                    </div>
+                </div>
+                <div class="progress-step" id="step2">
+                    <div class="progress-step-number">2</div>
+                    <div class="progress-step-text">
+                        <div class="progress-step-title">Carregando</div>
+                        <div class="progress-step-status">master_calendar.ics</div>
+                    </div>
+                </div>
+                <div class="progress-step" id="step3">
+                    <div class="progress-step-number">3</div>
+                    <div class="progress-step-text">
+                        <div class="progress-step-title">Carregando</div>
+                        <div class="progress-step-status">manual_calendar.ics</div>
+                    </div>
+                </div>
+                <div class="progress-step" id="step4">
+                    <div class="progress-step-number">4</div>
+                    <div class="progress-step-text">
+                        <div class="progress-step-title">Renderizando</div>
+                        <div class="progress-step-status">Calendário</div>
+                    </div>
+                </div>
+            </div>
+            <button class="sync-button" id="syncBtn">🔄 Sincronizar Agora</button>
+        </div>
+
+        <!-- STATS -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-number" id="totalEvents">0</div>
+                <div class="stat-label">Total de Eventos</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="manualBlocks">0</div>
+                <div class="stat-label">Bloqueios Manuais</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="manualRemoves">0</div>
+                <div class="stat-label">Remoções Manuais</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="reservations">0</div>
+                <div class="stat-label">Reservas</div>
+            </div>
+        </div>
+
+        <!-- CALENDAR -->
+        <div class="calendar-section">
+            <div class="calendar-header">
+                <h2>Calendário</h2>
+                <div class="month-nav">
+                    <button id="prevMonth">← Anterior</button>
+                    <div class="month-display" id="monthDisplay">Janeiro 2026</div>
+                    <button id="nextMonth">Próximo →</button>
+                </div>
+            </div>
+            <div class="calendar-grid">
+                <div class="weekdays">
+                    <div class="weekday">Dom</div>
+                    <div class="weekday">Seg</div>
+                    <div class="weekday">Ter</div>
+                    <div class="weekday">Qua</div>
+                    <div class="weekday">Qui</div>
+                    <div class="weekday">Sex</div>
+                    <div class="weekday">Sab</div>
+                </div>
+                <div class="days" id="daysContainer"></div>
+            </div>
+        </div>
+
+        <!-- EVENTS -->
+        <div class="events-section">
+            <div class="calendar-header">
+                <h2>Eventos Manuais</h2>
+                <button class="btn btn-primary" id="addEventBtn">+ Adicionar Evento</button>
+            </div>
+            <div class="events-list" id="eventsList"></div>
+        </div>
+
+        <!-- ACTIONS -->
+        <div class="actions-section">
+            <div class="actions-title">Ações</div>
+            <div class="actions-grid">
+                <button class="action-button" id="exportBtn">
+                    <div class="action-button-icon">⬇️</div>
+                    <div>Descarregar ICS</div>
+                </button>
+                <button class="action-button" id="saveBtn">
+                    <div class="action-button-icon">💾</div>
+                    <div>Guardar e Sync</div>
+                </button>
+                <button class="action-button" id="clearBtn">
+                    <div class="action-button-icon">🗑️</div>
+                    <div>Limpar Eventos</div>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: ADD EVENT -->
+    <div class="modal" id="addEventModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Adicionar Evento Manual</h3>
+                <button class="modal-close" id="closeModal">&times;</button>
+            </div>
+            <form id="eventForm">
+                <div class="form-group">
+                    <label class="form-label">Tipo de Evento</label>
+                    <div class="form-radio-group">
+                        <label class="form-radio">
+                            <input type="radio" name="eventType" value="MANUAL-BLOCK" checked>
+                            🔒 Bloquear Data
+                        </label>
+                        <label class="form-radio">
+                            <input type="radio" name="eventType" value="MANUAL-REMOVE">
+                            ❌ Remover Evento
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Data Início</label>
+                    <input type="date" class="form-input" id="eventStart" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Data Fim</label>
+                    <input type="date" class="form-input" id="eventEnd" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Notas (Opcional)</label>
+                    <textarea class="form-textarea" id="eventDescription" placeholder="Adicione uma descrição..."></textarea>
+                </div>
+
+                <div class="button-group">
+                    <button type="button" class="btn btn-secondary" id="cancelBtn">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Confirmar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // STATE
+        const STATE = {
+            currentDate: new Date(2026, 0, 8),
+            events: [],
+            selectedDates: [],
+            apiUrl: 'http://localhost:5000/api',
+            syncing: false
+        };
+
+        // HELPER FUNCTIONS
+        function log(msg, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            console.log(`[${timestamp}] [${type.toUpperCase()}] ${msg}`);
+        }
+
+        function formatDate(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function parseDate(dateStr) {
+            const [year, month, day] = dateStr.split('-');
+            return new Date(year, month - 1, day);
+        }
+
+        function getDaysInMonth(date) {
+            return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+        }
+
+        function getFirstDayOfMonth(date) {
+            return new Date(date.getFullYear(), date.getMonth(), 1).getDay();
+        }
+
+        // SYNCHRONIZATION
+        async function syncCalendars() {
+            if (STATE.syncing) return;
+            STATE.syncing = true;
+
+            try {
+                // STEP 1: Sync
+                updateProgressStep(1, 'active');
+                log('Sincronizando calendários...', 'info');
+                await delay(800);
+                updateProgressStep(1, 'completed');
+
+                // STEP 2: Load master
+                updateProgressStep(2, 'active');
+                log('Carregando master_calendar.ics...', 'info');
+                await loadCalendarFile('master');
+                await delay(600);
+                updateProgressStep(2, 'completed');
+
+                // STEP 3: Load manual
+                updateProgressStep(3, 'active');
+                log('Carregando manual_calendar.ics...', 'info');
+                await loadCalendarFile('manual');
+                await delay(600);
+                updateProgressStep(3, 'completed');
+
+                // STEP 4: Render
+                updateProgressStep(4, 'active');
+                log('Renderizando calendário...', 'info');
+                renderCalendar();
+                renderEvents();
+                updateStats();
+                await delay(400);
+                updateProgressStep(4, 'completed');
+
+                updateSyncStatus('Sincronizado', true);
+                log('Sincronização completa!', 'success');
+
+            } catch (error) {
+                log(`Erro na sincronização: ${error.message}`, 'error');
+                updateSyncStatus('Erro na sincronização', false);
+            } finally {
+                STATE.syncing = false;
+            }
+        }
+
+        function delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        async function loadCalendarFile(type) {
+            try {
+                const response = await fetch(`${STATE.apiUrl}/calendar/${type}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                const data = await response.json();
+                if (data.events) {
+                    STATE.events = STATE.events.concat(data.events);
+                }
+                return data;
+            } catch (error) {
+                log(`Erro ao carregar ${type}: ${error.message}`, 'warning');
+                return null;
+            }
+        }
+
+        // PROGRESS BAR
+        function updateProgressStep(step, status) {
+            const element = document.getElementById(`step${step}`);
+            if (!element) return;
+
+            element.classList.remove('active', 'completed');
+            if (status) {
+                element.classList.add(status);
+            }
+        }
+
+        function updateSyncStatus(message, success) {
+            const badge = document.getElementById('syncStatus');
+            badge.textContent = message;
+            badge.style.borderColor = success ? 'rgba(45, 182, 198, 0.5)' : 'rgba(192, 31, 47, 0.5)';
+            badge.style.color = success ? '#32b8c6' : '#c01f2f';
+        }
+
+        // CALENDAR RENDERING
+        function renderCalendar() {
+            const year = STATE.currentDate.getFullYear();
+            const month = STATE.currentDate.getMonth();
+            const firstDay = getFirstDayOfMonth(STATE.currentDate);
+            const daysInMonth = getDaysInMonth(STATE.currentDate);
+
+            // Update header
+            const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+                              'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+            document.getElementById('monthDisplay').textContent = `${monthNames[month]} ${year}`;
+
+            // Clear days
+            const daysContainer = document.getElementById('daysContainer');
+            daysContainer.innerHTML = '';
+
+            // Empty days from previous month
+            for (let i = 0; i < firstDay; i++) {
+                const emptyDay = document.createElement('div');
+                emptyDay.className = 'day empty';
+                emptyDay.textContent = '';
+                daysContainer.appendChild(emptyDay);
+            }
+
+            // Days of month
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dayElement = document.createElement('div');
+                dayElement.className = 'day';
+                dayElement.textContent = day;
+
+                const dateStr = formatDate(new Date(year, month, day));
+                const dayEvents = STATE.events.filter(e => {
+                    const eStart = new Date(e.dtstart);
+                    const eEnd = new Date(e.dtend);
+                    const current = new Date(year, month, day);
+                    return current >= eStart && current < eEnd;
+                });
+
+                // Apply class based on event type
+                if (dayEvents.length > 0) {
+                    if (dayEvents.some(e => e.categories === 'MANUAL-BLOCK')) {
+                        dayElement.classList.add('manual-block', 'has-event');
+                    } else if (dayEvents.some(e => e.categories === 'MANUAL-REMOVE')) {
+                        dayElement.classList.add('manual-remove', 'has-event');
+                    } else {
+                        dayElement.classList.add('reservation', 'has-event');
+                    }
+                }
+
+                dayElement.addEventListener('click', () => selectDate(dateStr, dayElement));
+                daysContainer.appendChild(dayElement);
+            }
+        }
+
+        function selectDate(dateStr, element) {
+            element.classList.toggle('selected');
+            const index = STATE.selectedDates.indexOf(dateStr);
+            if (index > -1) {
+                STATE.selectedDates.splice(index, 1);
+            } else {
+                STATE.selectedDates.push(dateStr);
+            }
+        }
+
+        // EVENTS
+        function renderEvents() {
+            const eventsList = document.getElementById('eventsList');
+            const manualEvents = STATE.events.filter(e => e.categories && e.categories.includes('MANUAL'));
+
+            if (manualEvents.length === 0) {
+                eventsList.innerHTML = '<div class="text-muted text-center" style="grid-column: 1/-1; padding: 40px;">Nenhum evento manual adicionado</div>';
+                return;
+            }
+
+            eventsList.innerHTML = manualEvents.map(event => `
+                <div class="event-card">
+                    <div class="event-card-header">
+                        <span class="event-type-badge ${event.categories === 'MANUAL-BLOCK' ? 'block' : 'remove'}">
+                            ${event.categories === 'MANUAL-BLOCK' ? '🔒 Bloquear' : '❌ Remover'}
+                        </span>
+                        <button class="event-card-actions" onclick="deleteEvent('${event.uid}')">🗑️</button>
+                    </div>
+                    <div class="event-card-date">${formatDate(new Date(event.dtstart))} a ${formatDate(new Date(event.dtend))}</div>
+                    ${event.description ? `<div class="event-card-description">${event.description}</div>` : ''}
+                </div>
+            `).join('');
+        }
+
+        function deleteEvent(uid) {
+            STATE.events = STATE.events.filter(e => e.uid !== uid);
+            renderEvents();
+            updateStats();
+        }
+
+        function updateStats() {
+            const total = STATE.events.length;
+            const blocks = STATE.events.filter(e => e.categories === 'MANUAL-BLOCK').length;
+            const removes = STATE.events.filter(e => e.categories === 'MANUAL-REMOVE').length;
+            const reservations = STATE.events.filter(e => !e.categories || !e.categories.includes('MANUAL')).length;
+
+            document.getElementById('totalEvents').textContent = total;
+            document.getElementById('manualBlocks').textContent = blocks;
+            document.getElementById('manualRemoves').textContent = removes;
+            document.getElementById('reservations').textContent = reservations;
+        }
+
+        // MODAL
+        function showModal() {
+            document.getElementById('addEventModal').classList.add('active');
+        }
+
+        function hideModal() {
+            document.getElementById('addEventModal').classList.remove('active');
+            document.getElementById('eventForm').reset();
+        }
+
+        function addEvent(eventData) {
+            const event = {
+                uid: `manual-event-${Date.now()}@rental-calendar.com`,
+                summary: `Manual ${eventData.type === 'MANUAL-BLOCK' ? 'Block' : 'Remove'}`,
+                dtstart: new Date(eventData.start),
+                dtend: new Date(eventData.end),
+                description: eventData.description || '',
+                categories: eventData.type,
+                created: new Date(),
+                status: 'CONFIRMED'
+            };
+
+            STATE.events.push(event);
+            renderEvents();
+            updateStats();
+            hideModal();
+            log(`Evento adicionado: ${event.summary}`, 'success');
+        }
+
+        // SAVE & SYNC
+        async function saveAndSync() {
+            try {
+                const manualEvents = STATE.events.filter(e => e.categories && e.categories.includes('MANUAL'));
+                
+                const response = await fetch(`${STATE.apiUrl}/calendar/save-manual`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        events: manualEvents.map(e => ({
+                            uid: e.uid,
+                            summary: e.summary,
+                            dtstart: e.dtstart.toISOString ? e.dtstart.toISOString() : e.dtstart,
+                            dtend: e.dtend.toISOString ? e.dtend.toISOString() : e.dtend,
+                            description: e.description,
+                            categories: e.categories
+                        }))
+                    })
+                });
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                const data = await response.json();
+                log(`Eventos guardados: ${data.events_saved}`, 'success');
+                log(`Git sincronizado: ${data.git_committed}`, 'success');
+            } catch (error) {
+                log(`Erro ao guardar: ${error.message}`, 'error');
+            }
+        }
+
+        // EXPORT
+        function exportToICS() {
+            let icsContent = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Rental Manual Calendar//PT
+CALSCALE:GREGORIAN
+X-WR-CALNAME:Manual Calendar Events
+X-WR-TIMEZONE:Europe/Lisbon
+
+`;
+
+            const manualEvents = STATE.events.filter(e => e.categories && e.categories.includes('MANUAL'));
+            manualEvents.forEach(event => {
+                const startDate = formatDate(event.dtstart);
+                const endDate = formatDate(event.dtend);
+
+                icsContent += `BEGIN:VEVENT
+SUMMARY:${event.summary}
+DTSTART;VALUE=DATE:${startDate.replace(/-/g, '')}
+DTEND;VALUE=DATE:${endDate.replace(/-/g, '')}
+UID:${event.uid}
+CATEGORIES:${event.categories}
+DESCRIPTION:${event.description || 'Manual Calendar Event'}
+STATUS:CONFIRMED
+TRANSP:TRANSPARENT
+END:VEVENT
+
+`;
+            });
+
+            icsContent += 'END:VCALENDAR';
+
+            // Download
+            const blob = new Blob([icsContent], { type: 'text/calendar' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `manual_calendar_${new Date().toISOString().split('T')[0]}.ics`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            log('Ficheiro ICS exportado', 'success');
+        }
+
+        // EVENT LISTENERS
+        document.getElementById('syncBtn').addEventListener('click', syncCalendars);
+        document.getElementById('prevMonth').addEventListener('click', () => {
+            STATE.currentDate.setMonth(STATE.currentDate.getMonth() - 1);
+            renderCalendar();
+        });
+        document.getElementById('nextMonth').addEventListener('click', () => {
+            STATE.currentDate.setMonth(STATE.currentDate.getMonth() + 1);
+            renderCalendar();
+        });
+
+        document.getElementById('addEventBtn').addEventListener('click', showModal);
+        document.getElementById('closeModal').addEventListener('click', hideModal);
+        document.getElementById('cancelBtn').addEventListener('click', hideModal);
+        document.getElementById('saveBtn').addEventListener('click', saveAndSync);
+        document.getElementById('exportBtn').addEventListener('click', exportToICS);
+        document.getElementById('clearBtn').addEventListener('click', () => {
+            if (confirm('Tem a certeza que deseja limpar todos os eventos manuais?')) {
+                STATE.events = STATE.events.filter(e => !e.categories || !e.categories.includes('MANUAL'));
+                renderEvents();
+                updateStats();
+                renderCalendar();
+                log('Eventos manuais removidos', 'info');
+            }
+        });
+
+        document.getElementById('eventForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+
+            const eventType = document.querySelector('input[name="eventType"]:checked').value;
+            const startDate = document.getElementById('eventStart').value;
+            const endDate = document.getElementById('eventEnd').value;
+            const description = document.getElementById('eventDescription').value;
+
+            if (!startDate || !endDate) {
+                alert('Por favor, preencha as datas');
+                return;
+            }
+
+            if (new Date(startDate) > new Date(endDate)) {
+                alert('Data de início deve ser antes da data de fim');
+                return;
+            }
+
+            addEvent({
+                type: eventType,
+                start: startDate,
+                end: endDate,
+                description: description
+            });
+        });
+
+        // Click outside modal
+        document.getElementById('addEventModal').addEventListener('click', (e) => {
+            if (e.target.id === 'addEventModal') {
+                hideModal();
+            }
+        });
+
+        // INITIALIZATION
+        window.addEventListener('load', () => {
+            log('Aplicação carregada', 'success');
+            renderCalendar();
+            updateStats();
+            syncCalendars();
+        });
+    </script>
+</body>
+</html>
