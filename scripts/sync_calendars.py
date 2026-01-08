@@ -1,19 +1,33 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 """
-Manual Calendar Editor - Synchronization Script - Fase 3
-Synchronizes calendar events from multiple sources and applies manual adjustments
-NEW: Support for CATEGORIES:MANUAL-BLOCK and CATEGORIES:MANUAL-REMOVE
-Version: 3.0
+Manual Calendar Editor - Synchronization Script - Fase 3.1 FIXED
+Combines stable version with Fase 3 features
+Correctly generates both import_calendar.ics and master_calendar.ics
+with automatic prep times (TP Antes/TP Depois)
+
+Version: 3.1
 Date: January 8, 2026
+Developer: PBRANDÃO + AI
 """
 
 import os
+import sys
 import logging
-from datetime import datetime, timedelta
-from icalendar import Calendar, Event
-import requests
-from dotenv import load_dotenv
-import pytz
+from datetime import datetime, timedelta, date
 from pathlib import Path
+from typing import List, Dict, Optional, Set
+
+try:
+    from icalendar import Calendar, Event
+    import requests
+    from dotenv import load_dotenv
+    import pytz
+except ImportError as e:
+    print(f"ERRO de importacao: {e}")
+    print("Execute: pip install icalendar requests python-dotenv pytz")
+    sys.exit(1)
 
 # ============================================================================
 # CONFIGURATION
@@ -26,9 +40,8 @@ REPO_PATH = os.getenv('REPO_PATH', '.')
 AIRBNB_ICAL_URL = os.getenv('AIRBNB_ICAL_URL', '')
 BOOKING_ICAL_URL = os.getenv('BOOKING_ICAL_URL', '')
 VRBO_ICAL_URL = os.getenv('VRBO_ICAL_URL', '')
-AIRBNB_PREP_HOURS = int(os.getenv('AIRBNB_PREP_HOURS', 24))
-BOOKING_PREP_HOURS = int(os.getenv('BOOKING_PREP_HOURS', 24))
-VRBO_PREP_HOURS = int(os.getenv('VRBO_PREP_HOURS', 24))
+BUFFER_DAYS_BEFORE = int(os.getenv('BUFFER_DAYS_BEFORE', 1))
+BUFFER_DAYS_AFTER = int(os.getenv('BUFFER_DAYS_AFTER', 1))
 
 # File paths
 IMPORT_CALENDAR_PATH = os.path.join(REPO_PATH, 'import_calendar.ics')
@@ -40,7 +53,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] [%(levelname)s] %(message)s',
     handlers=[
-        logging.FileHandler(os.path.join(REPO_PATH, 'sync.log')),
+        logging.FileHandler(os.path.join(REPO_PATH, 'sync.log'), encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -50,320 +63,440 @@ logger = logging.getLogger(__name__)
 # HELPER FUNCTIONS
 # ============================================================================
 
+def to_datetime(dt_obj) -> Optional[datetime]:
+    """Converte date ou datetime para datetime"""
+    if dt_obj is None:
+        return None
+    if isinstance(dt_obj, datetime):
+        if dt_obj.tzinfo is None:
+            return dt_obj.replace(tzinfo=pytz.UTC)
+        return dt_obj
+    elif isinstance(dt_obj, date):
+        return datetime.combine(dt_obj, datetime.min.time()).replace(tzinfo=pytz.UTC)
+    return None
+
+def to_date(dt_obj) -> Optional[date]:
+    """Extrai data de date ou datetime"""
+    if dt_obj is None:
+        return None
+    if isinstance(dt_obj, datetime):
+        return dt_obj.date()
+    elif isinstance(dt_obj, date):
+        return dt_obj
+    return None
+
+def normalize_uid(uid: str) -> str:
+    """Normaliza UID para comparação"""
+    if not uid:
+        return ""
+    return str(uid).strip().lower()
+
 def log_info(msg):
-    """Log info message"""
+    """Log info"""
     logger.info(msg)
     print(f"[INFO] {msg}")
 
 def log_warning(msg):
-    """Log warning message"""
+    """Log warning"""
     logger.warning(msg)
     print(f"[WARNING] {msg}")
 
 def log_error(msg):
-    """Log error message"""
+    """Log error"""
     logger.error(msg)
     print(f"[ERROR] {msg}")
 
 def log_success(msg):
-    """Log success message"""
+    """Log success"""
     logger.info(msg)
     print(f"[SUCCESS] ✅ {msg}")
 
-def download_calendar(url, source_name):
+# ============================================================================
+# DOWNLOAD & IMPORT
+# ============================================================================
+
+def download_calendar(url: str, source: str) -> Optional[Calendar]:
     """Download calendar from URL"""
     try:
         if not url:
-            log_warning(f"No URL configured for {source_name}")
+            log_warning(f"No URL configured for {source}")
             return None
-        
-        log_info(f"Downloading {source_name} calendar...")
+
+        log_info(f"[IMPORT] Downloading {source}...")
         response = requests.get(url, timeout=30)
         response.raise_for_status()
         
         cal = Calendar.from_ical(response.content)
-        events = []
         
-        for component in cal.walk():
-            if component.name == "VEVENT":
-                events.append(component)
+        events = [c for c in cal.walk() if c.name == "VEVENT"]
+        log_success(f"Downloaded {len(events)} events from {source}")
         
-        log_success(f"Downloaded {len(events)} events from {source_name}")
-        return events
+        return cal
+
     except Exception as e:
-        log_error(f"Error downloading {source_name}: {str(e)}")
+        log_error(f"Error downloading {source}: {str(e)}")
+        return None
+
+def fetch_all_calendars() -> Optional[Dict[str, Optional[Calendar]]]:
+    """Download all 3 calendars"""
+    log_info("STEP 1: Importing calendars...")
+    
+    calendars = {
+        'AIRBNB': download_calendar(AIRBNB_ICAL_URL, 'AIRBNB'),
+        'BOOKING': download_calendar(BOOKING_ICAL_URL, 'BOOKING'),
+        'VRBO': download_calendar(VRBO_ICAL_URL, 'VRBO'),
+    }
+    
+    if all(v is None for v in calendars.values()):
+        log_error("[ERRO] Nenhum calendario foi importado com sucesso")
+        return None
+    
+    return calendars
+
+# ============================================================================
+# EXTRACT & PROCESS EVENTS
+# ============================================================================
+
+def extract_events(calendars: Dict[str, Optional[Calendar]]) -> List[Dict]:
+    """Extract events from all calendars"""
+    log_info("STEP 2: Extracting events...")
+    
+    all_events = []
+    
+    for source, cal in calendars.items():
+        if cal is None:
+            continue
+        
+        try:
+            for component in cal.walk():
+                if component.name == "VEVENT":
+                    dtstart = component.get('DTSTART')
+                    dtend = component.get('DTEND')
+                    
+                    event = {
+                        'source': source,
+                        'uid': str(component.get('UID', '')),
+                        'summary': str(component.get('SUMMARY', 'Sem titulo')),
+                        'dtstart': dtstart.dt if dtstart else None,
+                        'dtend': dtend.dt if dtend else None,
+                        'description': str(component.get('DESCRIPTION', '')),
+                        'location': str(component.get('LOCATION', '')),
+                        'component': component,
+                    }
+                    
+                    all_events.append(event)
+        
+        except Exception as e:
+            log_error(f"Error extracting from {source}: {str(e)}")
+            continue
+    
+    log_info(f"Extracted {len(all_events)} events total")
+    return all_events
+
+def deduplicate_events(events: List[Dict]) -> List[Dict]:
+    """Remove duplicate events"""
+    log_info("STEP 3: Deduplicating events...")
+    
+    if not events:
+        log_warning("No events to deduplicate")
         return []
+    
+    groups = {}
+    
+    for event in events:
+        key = (
+            to_date(event['dtstart']),
+            to_date(event['dtend']),
+            event['summary']
+        )
+        
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(event)
+    
+    deduplicated = []
+    for key, group in groups.items():
+        best = max(group, key=lambda e: len(e.get('description', '')))
+        deduplicated.append(best)
+    
+    removed = len(events) - len(deduplicated)
+    if removed > 0:
+        log_warning(f"Removed {removed} duplicates")
+    
+    return deduplicated
 
-def apply_prep_time(event, prep_hours):
-    """Apply preparation time before event"""
-    try:
-        dtstart = event.decoded('dtstart')
-        if isinstance(dtstart, datetime):
-            # Subtract prep time
-            new_start = dtstart - timedelta(hours=prep_hours)
-            event['dtstart'].dt = new_start
-        return event
-    except Exception as e:
-        log_warning(f"Could not apply prep time: {str(e)}")
-        return event
+# ============================================================================
+# MANUAL CALENDAR HANDLING
+# ============================================================================
 
-def load_manual_events():
-    """Load manual events from manual_calendar.ics"""
+def load_manual_calendar() -> Optional[Calendar]:
+    """Load manual calendar"""
     try:
-        if not os.path.isfile(MANUAL_CALENDAR_PATH):
-            log_info("No manual calendar found")
-            return {
-                'manual_blocks': [],
-                'manual_removes': []
-            }
+        if not Path(MANUAL_CALENDAR_PATH).exists():
+            log_info(f"No {MANUAL_CALENDAR_PATH} found")
+            return None
         
         with open(MANUAL_CALENDAR_PATH, 'rb') as f:
             cal = Calendar.from_ical(f.read())
-            manual_blocks = []
-            manual_removes = []
-            
-            for component in cal.walk():
-                if component.name == "VEVENT":
-                    categories = str(component.get('categories', ''))
-                    
-                    if categories == 'MANUAL-BLOCK':
-                        manual_blocks.append(component)
-                    elif categories == 'MANUAL-REMOVE':
-                        manual_removes.append(component)
-            
-            log_success(f"Loaded {len(manual_blocks)} MANUAL-BLOCK and {len(manual_removes)} MANUAL-REMOVE events")
-            
-            return {
-                'manual_blocks': manual_blocks,
-                'manual_removes': manual_removes
-            }
+            log_info(f"Loaded {MANUAL_CALENDAR_PATH}")
+            return cal
+    
     except Exception as e:
-        log_error(f"Error loading manual events: {str(e)}")
-        return {
-            'manual_blocks': [],
-            'manual_removes': []
-        }
+        log_error(f"Error loading manual calendar: {str(e)}")
+        return None
 
-def should_remove_event(event, manual_removes):
-    """Check if event should be removed based on MANUAL-REMOVE entries"""
+def get_blocked_uids(manual_calendar: Optional[Calendar]) -> Set[str]:
+    """Extract UIDs marked as PRIVATE (manual blocks)"""
+    blocked_uids = set()
+    
+    if not manual_calendar:
+        return blocked_uids
+    
     try:
-        event_start = event.decoded('dtstart')
-        event_end = event.decoded('dtend')
-        
-        # Convert to date if datetime
-        if isinstance(event_start, datetime):
-            event_start = event_start.date() if hasattr(event_start, 'date') else event_start
-        if isinstance(event_end, datetime):
-            event_end = event_end.date() if hasattr(event_end, 'date') else event_end
-        
-        for remove_event in manual_removes:
-            remove_start = remove_event.decoded('dtstart')
-            remove_end = remove_event.decoded('dtend')
-            
-            # Convert to date if datetime
-            if isinstance(remove_start, datetime):
-                remove_start = remove_start.date() if hasattr(remove_start, 'date') else remove_start
-            if isinstance(remove_end, datetime):
-                remove_end = remove_end.date() if hasattr(remove_end, 'date') else remove_end
-            
-            # Check if event falls within removal period
-            if remove_start <= event_start < remove_end or remove_start < event_end <= remove_end:
-                return True
-        
-        return False
+        for component in manual_calendar.walk():
+            if component.name == "VEVENT":
+                event_class = component.get('CLASS')
+                if event_class and str(event_class).lower() == 'private':
+                    uid = normalize_uid(str(component.get('UID', '')))
+                    if uid:
+                        blocked_uids.add(uid)
+                        summary = str(component.get('SUMMARY', 'evento'))
+                        log_info(f"[MANUAL BLOCK] ⏸️ {summary}")
+    
     except Exception as e:
-        log_warning(f"Error checking removal: {str(e)}")
-        return False
+        log_error(f"Error reading manual blocks: {str(e)}")
+    
+    if blocked_uids:
+        log_success(f"Loaded {len(blocked_uids)} manual blocks")
+    
+    return blocked_uids
 
-def event_overlaps_block(event, manual_blocks):
-    """Check if event overlaps with MANUAL-BLOCK"""
-    try:
-        event_start = event.decoded('dtstart')
-        event_end = event.decoded('dtend')
-        
-        # Convert to date if datetime
-        if isinstance(event_start, datetime):
-            event_start = event_start.date() if hasattr(event_start, 'date') else event_start
-        if isinstance(event_end, datetime):
-            event_end = event_end.date() if hasattr(event_end, 'date') else event_end
-        
-        for block_event in manual_blocks:
-            block_start = block_event.decoded('dtstart')
-            block_end = block_event.decoded('dtend')
-            
-            # Convert to date if datetime
-            if isinstance(block_start, datetime):
-                block_start = block_start.date() if hasattr(block_start, 'date') else block_start
-            if isinstance(block_end, datetime):
-                block_end = block_end.date() if hasattr(block_end, 'date') else block_end
-            
-            # Check for overlap
-            if not (event_end <= block_start or event_start >= block_end):
-                return True
-        
-        return False
-    except Exception as e:
-        log_warning(f"Error checking block overlap: {str(e)}")
-        return False
+# ============================================================================
+# CREATE CALENDARS
+# ============================================================================
 
-def deduplicate_events(events):
-    """Remove duplicate events"""
-    unique_events = {}
-    duplicates = 0
+def create_import_calendar(events: List[Dict]) -> Calendar:
+    """
+    Create import calendar with:
+    1. RESERVATION (original)
+    2. TP ANTES (prep time before)
+    3. TP DEPOIS (prep time after)
+    """
+    log_info("STEP 4: Creating import calendar (with prep times)...")
+    
+    import_cal = Calendar()
+    import_cal.add('prodid', '-//Rental Import Calendar//PT')
+    import_cal.add('version', '2.0')
+    import_cal.add('calscale', 'GREGORIAN')
+    import_cal.add('x-wr-calname', 'Rental Import Calendar')
+    import_cal.add('x-wr-timezone', 'Europe/Lisbon')
+    
+    event_count = 0
     
     for event in events:
         try:
-            uid = str(event.get('uid', ''))
-            if uid not in unique_events:
-                unique_events[uid] = event
-            else:
-                duplicates += 1
-        except:
-            unique_events[str(len(unique_events))] = event
-    
-    if duplicates > 0:
-        log_warning(f"Removed {duplicates} duplicate events")
-    
-    return list(unique_events.values())
-
-def create_master_calendar(all_events):
-    """Create master calendar from all events"""
-    try:
-        cal = Calendar()
-        cal.add('prodid', '-//Rental Master Calendar//PT')
-        cal.add('version', '2.0')
-        cal.add('calscale', 'GREGORIAN')
-        cal.add('x-wr-calname', 'Master Calendar (Reservations)')
-        cal.add('x-wr-timezone', 'Europe/Lisbon')
-        
-        for event in all_events:
-            cal.add_component(event)
-        
-        return cal
-    except Exception as e:
-        log_error(f"Error creating master calendar: {str(e)}")
-        return None
-
-# ============================================================================
-# MAIN SYNCHRONIZATION FUNCTION
-# ============================================================================
-
-def synchronize():
-    """Main synchronization function"""
-    try:
-        log_info("=" * 70)
-        log_info("STARTING CALENDAR SYNCHRONIZATION - FASE 3")
-        log_info(f"Timestamp: {datetime.now().isoformat()}")
-        log_info("=" * 70)
-        
-        # Step 1: Download calendars from sources
-        log_info("\n[STEP 1] Downloading calendars from sources...")
-        
-        airbnb_events = download_calendar(AIRBNB_ICAL_URL, "Airbnb") or []
-        booking_events = download_calendar(BOOKING_ICAL_URL, "Booking") or []
-        vrbo_events = download_calendar(VRBO_ICAL_URL, "Vrbo") or []
-        
-        # Apply prep times
-        log_info("Applying preparation times...")
-        airbnb_events = [apply_prep_time(e, AIRBNB_PREP_HOURS) for e in airbnb_events]
-        booking_events = [apply_prep_time(e, BOOKING_PREP_HOURS) for e in booking_events]
-        vrbo_events = [apply_prep_time(e, VRBO_PREP_HOURS) for e in vrbo_events]
-        
-        # Combine all events
-        all_imported_events = airbnb_events + booking_events + vrbo_events
-        log_success(f"Downloaded {len(all_imported_events)} events total")
-        
-        # Step 2: Deduplicate
-        log_info("\n[STEP 2] Deduplicating events...")
-        all_imported_events = deduplicate_events(all_imported_events)
-        log_success(f"After deduplication: {len(all_imported_events)} unique events")
-        
-        # Step 3: Load manual events
-        log_info("\n[STEP 3] Loading manual events...")
-        manual_data = load_manual_events()
-        manual_blocks = manual_data['manual_blocks']
-        manual_removes = manual_data['manual_removes']
-        
-        # Step 4: Apply manual adjustments
-        log_info("\n[STEP 4] Applying manual adjustments...")
-        
-        # Filter out removed events
-        filtered_events = []
-        removed_count = 0
-        
-        for event in all_imported_events:
-            if should_remove_event(event, manual_removes):
-                removed_count += 1
-                log_info(f"  Removing: {event.get('summary', 'Unknown')}")
-            else:
-                filtered_events.append(event)
-        
-        if removed_count > 0:
-            log_success(f"Removed {removed_count} events based on MANUAL-REMOVE")
-        
-        # Add manual blocks
-        all_final_events = filtered_events + manual_blocks
-        
-        if len(manual_blocks) > 0:
-            log_success(f"Added {len(manual_blocks)} MANUAL-BLOCK events")
-        
-        # Step 5: Create master calendar
-        log_info("\n[STEP 5] Creating master calendar...")
-        master_cal = create_master_calendar(all_final_events)
-        
-        if not master_cal:
-            log_error("Failed to create master calendar")
-            return False
-        
-        # Step 6: Save master calendar
-        log_info("\n[STEP 6] Saving master calendar...")
-        try:
-            with open(MASTER_CALENDAR_PATH, 'wb') as f:
-                f.write(master_cal.to_ical())
-            log_success(f"Saved {len(all_final_events)} events to {MASTER_CALENDAR_PATH}")
+            dtstart = to_datetime(event['dtstart'])
+            dtend = to_datetime(event['dtend'])
+            
+            if not dtstart or not dtend:
+                continue
+            
+            source = event.get('source', 'UNKNOWN')
+            uid_base = event.get('uid', '')
+            summary = event.get('summary', 'Sem titulo')
+            start_date = to_date(dtstart)
+            end_date = to_date(dtend)
+            
+            # EVENT 1: ORIGINAL RESERVATION
+            reserva_event = Event()
+            reserva_event.add('uid', f"{uid_base}")
+            reserva_event.add('summary', f"Reserva de {source}")
+            reserva_event.add('dtstart', dtstart)
+            reserva_event.add('dtend', dtend)
+            reserva_event.add('description', f"Check-in: {start_date}\nCheck-out: {end_date}")
+            reserva_event.add('location', event.get('location', ''))
+            reserva_event.add('created', datetime.now(pytz.UTC))
+            reserva_event.add('last-modified', datetime.now(pytz.UTC))
+            reserva_event.add('status', 'CONFIRMED')
+            reserva_event.add('categories', 'RESERVATION-NATIVE')
+            reserva_event.add('transp', 'TRANSPARENT')
+            
+            import_cal.add_component(reserva_event)
+            event_count += 1
+            
+            # EVENT 2: TP ANTES (prep time before)
+            tp_before_uid = f"{uid_base}-tp-before"
+            tp_before_start = start_date - timedelta(days=BUFFER_DAYS_BEFORE)
+            tp_before_end = start_date
+            
+            tp_before_event = Event()
+            tp_before_event.add('uid', tp_before_uid)
+            tp_before_event.add('summary', f"TP Antes / {tp_before_start}")
+            tp_before_event.add('dtstart', tp_before_start)
+            tp_before_event.add('dtend', tp_before_end)
+            tp_before_event.add('description', "Tempo de Preparacao")
+            tp_before_event.add('location', event.get('location', ''))
+            tp_before_event.add('created', datetime.now(pytz.UTC))
+            tp_before_event.add('last-modified', datetime.now(pytz.UTC))
+            tp_before_event.add('status', 'CONFIRMED')
+            tp_before_event.add('transp', 'TRANSPARENT')
+            tp_before_event.add('categories', 'PREP-TIME-BEFORE')
+            tp_before_event.add('class', 'PUBLIC')
+            
+            import_cal.add_component(tp_before_event)
+            event_count += 1
+            
+            # EVENT 3: TP DEPOIS (prep time after)
+            tp_after_uid = f"{uid_base}-tp-after"
+            tp_after_start = end_date
+            tp_after_end = end_date + timedelta(days=BUFFER_DAYS_AFTER)
+            
+            tp_after_event = Event()
+            tp_after_event.add('uid', tp_after_uid)
+            tp_after_event.add('summary', f"TP Depois / {tp_after_start}")
+            tp_after_event.add('dtstart', tp_after_start)
+            tp_after_event.add('dtend', tp_after_end)
+            tp_after_event.add('description', "Tempo de Preparacao")
+            tp_after_event.add('location', event.get('location', ''))
+            tp_after_event.add('created', datetime.now(pytz.UTC))
+            tp_after_event.add('last-modified', datetime.now(pytz.UTC))
+            tp_after_event.add('status', 'CONFIRMED')
+            tp_after_event.add('transp', 'TRANSPARENT')
+            tp_after_event.add('categories', 'PREP-TIME-AFTER')
+            tp_after_event.add('class', 'PUBLIC')
+            
+            import_cal.add_component(tp_after_event)
+            event_count += 1
+            
         except Exception as e:
-            log_error(f"Error saving master calendar: {str(e)}")
-            return False
+            log_error(f"Error processing event: {str(e)}")
+            continue
+    
+    log_success(f"Import calendar created: {event_count} events ({len(events)} reservations)")
+    return import_cal
+
+def create_master_calendar(import_calendar: Calendar, blocked_uids: Set[str]) -> Calendar:
+    """Create master calendar with blocked UIDs removed"""
+    log_info("STEP 5: Creating master calendar (applying blocks)...")
+    
+    master = Calendar()
+    master.add('prodid', '-//Rental Master Calendar//PT')
+    master.add('version', '2.0')
+    master.add('calscale', 'GREGORIAN')
+    master.add('x-wr-calname', 'Rental Master Calendar')
+    master.add('x-wr-timezone', 'Europe/Lisbon')
+    
+    event_count = 0
+    skipped_count = 0
+    
+    try:
+        for component in import_calendar.walk():
+            if component.name == "VEVENT":
+                uid = normalize_uid(str(component.get('UID', '')))
+                
+                if uid in blocked_uids:
+                    summary = str(component.get('SUMMARY', 'evento'))
+                    log_info(f"[BLOCK] ⏸️ Removing: {summary}")
+                    skipped_count += 1
+                else:
+                    master.add_component(component)
+                    event_count += 1
+    
+    except Exception as e:
+        log_error(f"Error creating master: {str(e)}")
+    
+    log_success(f"Master created: {event_count} events (blocked: {skipped_count})")
+    return master
+
+def export_to_file(calendar: Calendar, filename: str) -> bool:
+    """Export calendar to file"""
+    try:
+        log_info(f"Exporting to {filename}...")
         
-        # Summary
-        log_info("\n" + "=" * 70)
-        log_info("SYNCHRONIZATION SUMMARY")
-        log_info("=" * 70)
-        log_info(f"Imported events: {len(all_imported_events)}")
-        log_info(f"  ├─ Airbnb: {len(airbnb_events)}")
-        log_info(f"  ├─ Booking: {len(booking_events)}")
-        log_info(f"  └─ Vrbo: {len(vrbo_events)}")
-        log_info(f"Manual adjustments:")
-        log_info(f"  ├─ Removed: {removed_count}")
-        log_info(f"  └─ Blocked: {len(manual_blocks)}")
-        log_info(f"Final events: {len(all_final_events)}")
-        log_success("Synchronization completed successfully!")
-        log_info("=" * 70)
+        with open(filename, 'wb') as f:
+            f.write(calendar.to_ical())
+        
+        file_size = os.path.getsize(filename)
+        log_success(f"Saved {filename} ({file_size} bytes)")
         
         return True
-        
+    
     except Exception as e:
-        log_error(f"Fatal error during synchronization: {str(e)}")
+        log_error(f"Error exporting {filename}: {str(e)}")
         return False
 
 # ============================================================================
 # MAIN
 # ============================================================================
 
+def main() -> int:
+    """Main function"""
+    log_info("=" * 70)
+    log_info("CALENDAR SYNCHRONIZATION - FASE 3.1")
+    log_info(f"Timestamp: {datetime.now().isoformat()}")
+    log_info(f"Config: TP antes={BUFFER_DAYS_BEFORE}, TP depois={BUFFER_DAYS_AFTER}")
+    log_info("=" * 70)
+    
+    try:
+        # Download calendars
+        calendars = fetch_all_calendars()
+        if calendars is None:
+            log_error("Failed to download calendars")
+            return 1
+        
+        # Extract events
+        events = extract_events(calendars)
+        if not events:
+            log_error("No events extracted")
+            return 2
+        
+        # Deduplicate
+        events = deduplicate_events(events)
+        
+        # Load manual calendar
+        manual_cal = load_manual_calendar()
+        blocked_uids = get_blocked_uids(manual_cal)
+        
+        # Create import calendar
+        import_cal = create_import_calendar(events)
+        
+        # Create master calendar
+        master_cal = create_master_calendar(import_cal, blocked_uids)
+        
+        # Export files
+        if not export_to_file(import_cal, IMPORT_CALENDAR_PATH):
+            return 3
+        
+        if not export_to_file(master_cal, MASTER_CALENDAR_PATH):
+            return 3
+        
+        # Summary
+        log_info("=" * 70)
+        log_success("SYNCHRONIZATION COMPLETED!")
+        log_info(f"Files generated:")
+        log_info(f"  - {IMPORT_CALENDAR_PATH}")
+        log_info(f"  - {MASTER_CALENDAR_PATH}")
+        log_info(f"  - {MANUAL_CALENDAR_PATH} (if exists)")
+        log_info("=" * 70)
+        
+        return 0
+    
+    except Exception as e:
+        log_error(f"Fatal error: {str(e)}")
+        return 4
+
+# ============================================================================
+# ENTRY POINT
+# ============================================================================
+
 if __name__ == '__main__':
     try:
-        # Create repo directory if it doesn't exist
         Path(REPO_PATH).mkdir(parents=True, exist_ok=True)
-        
-        # Run synchronization
-        success = synchronize()
-        
-        # Exit with appropriate code
-        exit(0 if success else 1)
-        
+        exit_code = main()
+        sys.exit(exit_code)
     except KeyboardInterrupt:
-        log_warning("Synchronization cancelled by user")
-        exit(1)
+        log_warning("Cancelled by user")
+        sys.exit(1)
     except Exception as e:
         log_error(f"Unexpected error: {str(e)}")
-        exit(1)
+        sys.exit(1)
