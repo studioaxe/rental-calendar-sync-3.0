@@ -1,0 +1,370 @@
+{% extends "base.html" %}
+
+{% block title %}Login - Rental Calendar Sync{% endblock %}
+
+{% block content %}
+<style>
+    /* ==================== VARIABLES & COLORS ==================== */
+    :root {
+        --primary: #2563eb;
+        --primary-dark: #1d4ed8;
+        --accent: #f43f5e;
+        --bg-gradient-1: #0f172a;
+        --bg-gradient-2: #1e293b;
+        --surface: #1e293b;
+        --surface-light: #334155;
+        --text-primary: #f1f5f9;
+        --text-secondary: #cbd5e1;
+        --input-bg: #0f172a;
+        --input-border: #475569;
+        --success: #10b981;
+        --error: #ef4444;
+    }
+
+    /* ==================== RESET & BASE ==================== */
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    body {
+        font-family: 'Segoe UI', 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
+        background: linear-gradient(135deg, var(--bg-gradient-1) 0%, var(--bg-gradient-2) 100%);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        color: var(--text-primary);
+    }
+
+    /* ==================== CONTAINER ==================== */
+    .login-container {
+        width: 100%;
+        max-width: 420px;
+        animation: slideIn 0.6s ease-out;
+    }
+
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    /* ==================== HEADER ==================== */
+    .login-header {
+        text-align: center;
+        margin-bottom: 40px;
+    }
+
+    .logo-circle {
+        width: 70px;
+        height: 70px;
+        margin: 0 auto 24px;
+        background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 36px;
+        box-shadow: 0 10px 30px rgba(37, 99, 235, 0.3);
+        animation: float 3s ease-in-out infinite;
+    }
+
+    @keyframes float {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-10px); }
+    }
+
+    .login-title {
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+        margin-bottom: 8px;
+        background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+
+    .login-subtitle {
+        font-size: 14px;
+        color: var(--text-secondary);
+        font-weight: 400;
+    }
+
+    /* ==================== FORM CARD ==================== */
+    .login-card {
+        background: var(--surface);
+        border: 1px solid var(--input-border);
+        border-radius: 16px;
+        padding: 40px;
+        backdrop-filter: blur(10px);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        margin-bottom: 20px;
+    }
+
+    /* ==================== FORM GROUPS ==================== */
+    .form-group {
+        margin-bottom: 24px;
+        position: relative;
+    }
+
+    .form-group:last-child {
+        margin-bottom: 0;
+    }
+
+    .form-label {
+        display: block;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        margin-bottom: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    /* ==================== INPUTS ==================== */
+    .form-input {
+        width: 100%;
+        padding: 14px 16px;
+        background: var(--input-bg);
+        border: 1.5px solid var(--input-border);
+        border-radius: 10px;
+        color: var(--text-primary);
+        font-size: 15px;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        outline: none;
+    }
+
+    .form-input::placeholder {
+        color: rgba(203, 213, 225, 0.5);
+    }
+
+    .form-input:hover {
+        border-color: var(--primary);
+        background: rgba(15, 23, 42, 0.8);
+    }
+
+    .form-input:focus {
+        border-color: var(--primary);
+        background: rgba(15, 23, 42, 0.9);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    /* ==================== ICONS IN INPUT ==================== */
+    .input-icon-wrapper {
+        position: relative;
+        display: flex;
+        align-items: center;
+    }
+
+    .input-icon {
+        position: absolute;
+        left: 14px;
+        pointer-events: none;
+        font-size: 18px;
+        color: var(--text-secondary);
+        opacity: 0.6;
+    }
+
+    .form-input-with-icon {
+        padding-left: 45px;
+    }
+
+    /* ==================== BUTTON ==================== */
+    .btn-login {
+        width: 100%;
+        padding: 14px 20px;
+        margin-top: 28px;
+        background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        box-shadow: 0 10px 25px rgba(37, 99, 235, 0.3);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .btn-login:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 15px 35px rgba(37, 99, 235, 0.4);
+    }
+
+    .btn-login:active:not(:disabled) {
+        transform: translateY(0);
+    }
+
+    .btn-login:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    /* ==================== ERROR MESSAGE ==================== */
+    .error-message {
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid var(--error);
+        color: #fca5a5;
+        padding: 12px 16px;
+        border-radius: 8px;
+        font-size: 13px;
+        margin-bottom: 24px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        animation: shake 0.4s ease;
+    }
+
+    @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        25% { transform: translateX(-5px); }
+        75% { transform: translateX(5px); }
+    }
+
+    .error-icon {
+        font-size: 16px;
+        flex-shrink: 0;
+    }
+
+    /* ==================== FOOTER ==================== */
+    .login-footer {
+        text-align: center;
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin-top: 20px;
+        padding-top: 20px;
+        border-top: 1px solid var(--input-border);
+    }
+
+    .footer-text {
+        display: block;
+        margin-bottom: 4px;
+    }
+
+    .version-badge {
+        display: inline-block;
+        background: rgba(37, 99, 235, 0.2);
+        color: var(--primary);
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        margin-top: 8px;
+    }
+
+    /* ==================== RESPONSIVE ==================== */
+    @media (max-width: 480px) {
+        .login-card {
+            padding: 30px;
+        }
+
+        .login-title {
+            font-size: 24px;
+        }
+
+        .form-input,
+        .btn-login {
+            font-size: 16px;
+        }
+    }
+</style>
+
+<div class="login-container">
+    <!-- HEADER -->
+    <div class="login-header">
+        <div class="logo-circle">📅</div>
+        <h1 class="login-title">Rental Calendar Sync</h1>
+        <p class="login-subtitle">Sincronização de Calendários</p>
+    </div>
+
+    <!-- LOGIN CARD -->
+    <div class="login-card">
+        {% if error %}
+        <div class="error-message">
+            <span class="error-icon">⚠️</span>
+            <span>{{ error }}</span>
+        </div>
+        {% endif %}
+
+        <form method="POST" id="loginForm">
+            <!-- USERNAME -->
+            <div class="form-group">
+                <label for="username" class="form-label">Utilizador</label>
+                <div class="input-icon-wrapper">
+                    <span class="input-icon">👤</span>
+                    <input
+                        type="text"
+                        id="username"
+                        name="username"
+                        class="form-input form-input-with-icon"
+                        placeholder="Insira o seu utilizador"
+                        required
+                        autofocus
+                    />
+                </div>
+            </div>
+
+            <!-- PASSWORD -->
+            <div class="form-group">
+                <label for="password" class="form-label">Palavra-passe</label>
+                <div class="input-icon-wrapper">
+                    <span class="input-icon">🔒</span>
+                    <input
+                        type="password"
+                        id="password"
+                        name="password"
+                        class="form-input form-input-with-icon"
+                        placeholder="Insira a sua palavra-passe"
+                        required
+                    />
+                </div>
+            </div>
+
+            <!-- LOGIN BUTTON -->
+            <button type="submit" class="btn-login">
+                Entrar
+            </button>
+        </form>
+    </div>
+
+    <!-- FOOTER -->
+    <div class="login-footer">
+        <span class="footer-text">🔐 Ligação Segura</span>
+        <span class="version-badge">v1.0 | Janeiro 2026 | Desenvolvido por PBRANDÃO</span>
+    </div>
+</div>
+
+<script>
+    // Previne submissão dupla
+    const form = document.getElementById('loginForm');
+    const submitBtn = form.querySelector('.btn-login');
+
+    form.addEventListener('submit', function(e) {
+        if (submitBtn.disabled) {
+            e.preventDefault();
+            return;
+        }
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Autenticando...';
+    });
+
+    // Foco automático no primeiro input
+    document.getElementById('username').focus();
+</script>
+
+{% endblock %}

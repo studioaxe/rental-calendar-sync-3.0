@@ -1,0 +1,33 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+sync.log
+
+# Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated files
+import_calendar.ics
