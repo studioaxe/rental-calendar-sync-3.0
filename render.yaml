@@ -10,7 +10,7 @@ services:
       cp manual_calendar.html /opt/render/project/src/static/ 2>/dev/null || true
     
     startCommand: >
-      gunicorn --workers 2 --worker-class sync --bind 0.0.0.0:$PORT app_fase3:app
+      gunicorn --workers 2 --worker-class sync --bind 0.0.0.0:$PORT app:app
     
     envVars:
       - key: FLASK_ENV
