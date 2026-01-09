@@ -1,13 +1,11 @@
 """
-
-Manual Calendar Editor - Backend API - Fase 3.1.2
-
+Manual Calendar Editor - Backend API - Fase 3.2
 Flask server with login, authentication, and calendar management
+Optimized for Render deployment
 
-Version: 3.1.2
-
+Version: 3.2
 Date: January 9, 2026
-
+Author: StudioAxe
 """
 
 from flask import Flask, jsonify, request, send_file, send_from_directory, redirect, session, url_for
@@ -20,6 +18,7 @@ import subprocess
 import logging
 from dotenv import load_dotenv
 import json
+import secrets
 
 # ============================================================================
 # CONFIGURATION
@@ -30,16 +29,16 @@ load_dotenv()
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 CORS(app)
 
-# ⭐ IMPORTANTE: Usar FLASK_SECRET_KEY (sem expor valor real!)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'dev-secret-key-change-in-production')
+# ⭐ Usar FLASK_SECRET_KEY do environment
+app.secret_key = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
 
 # Configuration
-REPO_PATH = os.getenv('REPO_PATH', '.')
+REPO_PATH = os.getenv('REPO_PATH', '/opt/render/project/src')
 PORT = int(os.getenv('PORT', 5000))
-FLASK_ENV = os.getenv('FLASK_ENV', 'development')
+FLASK_ENV = os.getenv('FLASK_ENV', 'production')
 CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'localhost,127.0.0.1')
 
-# Credenciais de login - valores vêm de environment, não do código!
+# Credenciais de login
 ADMIN_USERNAME = os.getenv('WEB_USERNAME', 'admin')
 ADMIN_PASSWORD = os.getenv('WEB_PASSWORD', 'admin123')
 
@@ -47,14 +46,17 @@ ADMIN_PASSWORD = os.getenv('WEB_PASSWORD', 'admin123')
 IMPORT_CALENDAR_PATH = os.path.join(REPO_PATH, 'import_calendar.ics')
 MASTER_CALENDAR_PATH = os.path.join(REPO_PATH, 'master_calendar.ics')
 MANUAL_CALENDAR_PATH = os.path.join(REPO_PATH, 'manual_calendar.ics')
-SYNC_SCRIPT_PATH = os.path.join(REPO_PATH, 'sync_calendars.py')
+SYNC_SCRIPT_PATH = os.path.join(REPO_PATH, 'scripts', 'sync_calendars.py')
 
 # Logging
+log_file = os.path.join(REPO_PATH, 'sync.log')
+os.makedirs(os.path.dirname(log_file), exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] [%(levelname)s] %(message)s',
     handlers=[
-        logging.FileHandler(os.path.join(REPO_PATH, 'sync.log')),
+        logging.FileHandler(log_file),
         logging.StreamHandler()
     ]
 )
@@ -88,11 +90,11 @@ def read_ics_file(filepath):
     try:
         if not file_exists(filepath):
             return None
-        
+
         with open(filepath, 'rb') as f:
             cal = Calendar.from_ical(f.read())
             events = []
-            
+
             for component in cal.walk():
                 if component.name == "VEVENT":
                     event = {
@@ -104,17 +106,17 @@ def read_ics_file(filepath):
                         'categories': str(component.get('categories', '')),
                         'status': str(component.get('status', 'CONFIRMED'))
                     }
-                    
+
                     # Convert dates to strings
                     if event['dtstart']:
                         event['dtstart'] = event['dtstart'].dt.isoformat() if hasattr(event['dtstart'].dt, 'isoformat') else str(event['dtstart'].dt)
                     if event['dtend']:
                         event['dtend'] = event['dtend'].dt.isoformat() if hasattr(event['dtend'].dt, 'isoformat') else str(event['dtend'].dt)
-                    
+
                     events.append(event)
-            
+
             return events
-    
+
     except Exception as e:
         log_error(f"Error reading ICS file {filepath}: {str(e)}")
         return None
@@ -128,7 +130,7 @@ def save_manual_events(events):
         cal.add('calscale', 'GREGORIAN')
         cal.add('x-wr-calname', 'Manual Calendar Events')
         cal.add('x-wr-timezone', 'Europe/Lisbon')
-        
+
         for event_data in events:
             event = Event()
             event.add('summary', event_data.get('summary', 'Manual Event'))
@@ -140,16 +142,17 @@ def save_manual_events(events):
             event.add('status', event_data.get('status', 'CONFIRMED'))
             event.add('transp', 'TRANSPARENT')
             event.add('created', datetime.now())
-            
+
             cal.add_component(event)
-        
+
         # Write to file
+        os.makedirs(os.path.dirname(MANUAL_CALENDAR_PATH), exist_ok=True)
         with open(MANUAL_CALENDAR_PATH, 'wb') as f:
             f.write(cal.to_ical())
-        
+
         log_info(f"Saved {len(events)} manual events to {MANUAL_CALENDAR_PATH}")
         return True
-    
+
     except Exception as e:
         log_error(f"Error saving manual events: {str(e)}")
         return False
@@ -169,15 +172,16 @@ def index():
 @app.route('/login', methods=['GET', 'POST'])
 def login_page():
     """Página de login"""
+    
     # Se já autenticado, ir para manual_calendar
     if is_authenticated():
         return redirect(url_for('manual_calendar'))
-    
+
     if request.method == 'POST':
         # Login POST - autenticar
         username = request.form.get('username', '')
         password = request.form.get('password', '')
-        
+
         # Validar credenciais
         if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
             # ✅ Login bem-sucedido
@@ -185,16 +189,16 @@ def login_page():
             session['username'] = username
             session.permanent = True
             app.permanent_session_lifetime = timedelta(hours=24)
-            
+
             log_info(f"✅ User '{username}' logged in successfully")
-            
+
             # ⭐ Redirecionar para /manual_calendar
             return redirect(url_for('manual_calendar'))
         else:
             # ❌ Login falhou
             log_error(f"❌ Failed login attempt for user '{username}'")
             return login_html(error="Utilizador ou password incorretos"), 401
-    
+
     # GET - mostrar página de login
     return login_html()
 
@@ -203,9 +207,7 @@ def logout():
     """Logout - Limpar sessão e ir para login"""
     username = session.get('username', 'unknown')
     session.clear()
-    
     log_info(f"User '{username}' logged out")
-    
     return redirect(url_for('login_page'))
 
 # ============================================================================
@@ -216,10 +218,11 @@ def logout():
 @app.route('/manual_calendar.html')
 def manual_calendar():
     """Página principal - protegida por autenticação"""
+    
     # ⭐ Verificar autenticação
     if not is_authenticated():
         return redirect(url_for('login_page'))
-    
+
     try:
         static_path = os.path.join(os.path.dirname(__file__), 'static', 'manual_calendar.html')
         if os.path.exists(static_path):
@@ -229,19 +232,22 @@ def manual_calendar():
                 'status': 'error',
                 'message': 'HTML file not found at /static/manual_calendar.html'
             }), 404
+
     except Exception as e:
         log_error(f"Error serving manual_calendar: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/static/<path:filename>')
 def serve_static(filename):
-    """Serve static files - protegido por autenticação"""
-    # ⭐ Proteger ficheiros estáticos (exceto login)
-    public_files = ['login.html', 'css/login.css', 'css/style.css', 'js/login.js']
+    """Serve static files"""
     
+    # Ficheiros públicos (não precisam autenticação para download)
+    public_files = ['css/login.css', 'css/style.css', 'js/login.js']
+    
+    # Proteger ficheiros estáticos
     if not is_authenticated() and filename not in public_files:
         return redirect(url_for('login_page'))
-    
+
     try:
         return send_from_directory('static', filename)
     except Exception as e:
@@ -259,7 +265,7 @@ def health_check():
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
         'environment': FLASK_ENV,
-        'version': '3.1.2',
+        'version': '3.2',
         'authenticated': is_authenticated()
     }), 200
 
@@ -277,16 +283,16 @@ def sync_calendars():
     """Execute calendar synchronization"""
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
-    
+
     try:
         log_info("Starting calendar synchronization...")
-        
+
         if not file_exists(SYNC_SCRIPT_PATH):
             return jsonify({
                 'status': 'error',
                 'message': f'Sync script not found: {SYNC_SCRIPT_PATH}'
             }), 404
-        
+
         result = subprocess.run(
             [f'python {SYNC_SCRIPT_PATH}'],
             shell=True,
@@ -295,7 +301,7 @@ def sync_calendars():
             text=True,
             timeout=300
         )
-        
+
         if result.returncode != 0:
             log_error(f"Sync script error: {result.stderr}")
             return jsonify({
@@ -303,19 +309,19 @@ def sync_calendars():
                 'message': 'Synchronization failed',
                 'error': result.stderr
             }), 500
-        
+
         log_info("Calendar synchronization completed successfully")
-        
+
         return jsonify({
             'status': 'success',
             'message': 'Synchronization completed',
             'timestamp': datetime.now().isoformat()
         }), 200
-    
+
     except subprocess.TimeoutExpired:
         log_error("Sync script timeout")
         return jsonify({'status': 'error', 'message': 'Synchronization timeout'}), 500
-    
+
     except Exception as e:
         log_error(f"Sync error: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -325,7 +331,7 @@ def load_master_calendar():
     """Load master_calendar.ics"""
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
-    
+
     try:
         if not file_exists(MASTER_CALENDAR_PATH):
             return jsonify({
@@ -333,9 +339,9 @@ def load_master_calendar():
                 'message': 'Master calendar not found',
                 'events': []
             }), 404
-        
+
         events = read_ics_file(MASTER_CALENDAR_PATH)
-        
+
         return jsonify({
             'status': 'success',
             'file': 'master_calendar.ics',
@@ -343,7 +349,7 @@ def load_master_calendar():
             'count': len(events) if events else 0,
             'timestamp': datetime.now().isoformat()
         }), 200
-    
+
     except Exception as e:
         log_error(f"Error loading master calendar: {str(e)}")
         return jsonify({
@@ -357,7 +363,7 @@ def load_import_calendar():
     """Load import_calendar.ics"""
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
-    
+
     try:
         if not file_exists(IMPORT_CALENDAR_PATH):
             return jsonify({
@@ -365,9 +371,9 @@ def load_import_calendar():
                 'message': 'Import calendar not found',
                 'events': []
             }), 404
-        
+
         events = read_ics_file(IMPORT_CALENDAR_PATH)
-        
+
         return jsonify({
             'status': 'success',
             'file': 'import_calendar.ics',
@@ -375,7 +381,7 @@ def load_import_calendar():
             'count': len(events) if events else 0,
             'timestamp': datetime.now().isoformat()
         }), 200
-    
+
     except Exception as e:
         log_error(f"Error loading import calendar: {str(e)}")
         return jsonify({
@@ -389,7 +395,7 @@ def load_manual_calendar():
     """Load manual_calendar.ics"""
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
-    
+
     try:
         if not file_exists(MANUAL_CALENDAR_PATH):
             return jsonify({
@@ -400,9 +406,9 @@ def load_manual_calendar():
                 'message': 'No manual events yet',
                 'timestamp': datetime.now().isoformat()
             }), 200
-        
+
         events = read_ics_file(MANUAL_CALENDAR_PATH)
-        
+
         return jsonify({
             'status': 'success',
             'file': 'manual_calendar.ics',
@@ -410,7 +416,7 @@ def load_manual_calendar():
             'count': len(events) if events else 0,
             'timestamp': datetime.now().isoformat()
         }), 200
-    
+
     except Exception as e:
         log_error(f"Error loading manual calendar: {str(e)}")
         return jsonify({
@@ -424,41 +430,41 @@ def save_manual_calendar():
     """Save manual events"""
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
-    
+
     try:
         data = request.get_json()
-        
+
         if not data or 'events' not in data:
             return jsonify({
                 'status': 'error',
                 'message': 'No events provided'
             }), 400
-        
+
         events = data['events']
-        
+
         # Validate events
         if not isinstance(events, list):
             return jsonify({
                 'status': 'error',
                 'message': 'Events must be a list'
             }), 400
-        
+
         # Save events to ICS file
         success = save_manual_events(events)
-        
+
         if not success:
             return jsonify({
                 'status': 'error',
                 'message': 'Failed to save events'
             }), 500
-        
+
         return jsonify({
             'status': 'success',
             'message': 'Manual events saved',
             'events_saved': len(events),
             'timestamp': datetime.now().isoformat()
         }), 200
-    
+
     except Exception as e:
         log_error(f"Error saving manual calendar: {str(e)}")
         return jsonify({
@@ -471,7 +477,7 @@ def calendar_status():
     """Get status of calendar files"""
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
-    
+
     try:
         status = {
             'import_calendar': {
@@ -491,7 +497,7 @@ def calendar_status():
                 'path': SYNC_SCRIPT_PATH
             }
         }
-        
+
         # Get file sizes if they exist
         for key in status:
             if status[key]['exists']:
@@ -501,14 +507,14 @@ def calendar_status():
                     status[key]['size_kb'] = round(size / 1024, 2)
                 except:
                     pass
-        
+
         return jsonify({
             'status': 'success',
             'repo_path': REPO_PATH,
             'files': status,
             'timestamp': datetime.now().isoformat()
         }), 200
-    
+
     except Exception as e:
         log_error(f"Error getting status: {str(e)}")
         return jsonify({
@@ -521,10 +527,10 @@ def export_calendar():
     """Export calendar file for download"""
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
-    
+
     try:
         calendar_type = request.args.get('type', 'manual')
-        
+
         if calendar_type == 'manual':
             filepath = MANUAL_CALENDAR_PATH
         elif calendar_type == 'master':
@@ -536,15 +542,15 @@ def export_calendar():
                 'status': 'error',
                 'message': 'Invalid calendar type'
             }), 400
-        
+
         if not file_exists(filepath):
             return jsonify({
                 'status': 'error',
                 'message': f'{calendar_type} calendar not found'
             }), 404
-        
+
         return send_file(filepath, as_attachment=True, download_name=f'{calendar_type}_calendar.ics')
-    
+
     except Exception as e:
         log_error(f"Error exporting calendar: {str(e)}")
         return jsonify({
@@ -582,7 +588,7 @@ def login_html(error=None):
     
     return f'''
     <!DOCTYPE html>
-    <html lang="pt">
+    <html lang="pt-PT">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -605,34 +611,26 @@ def login_html(error=None):
             
             .login-container {{
                 background: white;
-                border-radius: 12px;
-                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+                border-radius: 10px;
+                box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
                 padding: 40px;
                 width: 100%;
                 max-width: 400px;
             }}
             
-            h1 {{
+            .login-header {{
                 text-align: center;
+                margin-bottom: 30px;
+            }}
+            
+            .login-header h1 {{
                 color: #333;
                 margin-bottom: 10px;
                 font-size: 28px;
             }}
             
-            .subtitle {{
-                text-align: center;
+            .login-header p {{
                 color: #666;
-                margin-bottom: 30px;
-                font-size: 14px;
-            }}
-            
-            .error-message {{
-                background: #fee;
-                border: 1px solid #fcc;
-                border-radius: 6px;
-                color: #c33;
-                padding: 12px;
-                margin-bottom: 20px;
                 font-size: 14px;
             }}
             
@@ -640,70 +638,94 @@ def login_html(error=None):
                 margin-bottom: 20px;
             }}
             
-            label {{
+            .form-group label {{
                 display: block;
+                margin-bottom: 8px;
                 color: #333;
                 font-weight: 500;
-                margin-bottom: 8px;
-                font-size: 14px;
             }}
             
-            input {{
+            .form-group input {{
                 width: 100%;
                 padding: 12px;
                 border: 1px solid #ddd;
-                border-radius: 6px;
+                border-radius: 5px;
                 font-size: 14px;
                 transition: border-color 0.3s;
             }}
             
-            input:focus {{
+            .form-group input:focus {{
                 outline: none;
                 border-color: #667eea;
                 box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
             }}
             
-            button {{
+            .error-message {{
+                background-color: #fee;
+                color: #c33;
+                padding: 12px;
+                border-radius: 5px;
+                margin-bottom: 20px;
+                font-size: 14px;
+                border-left: 4px solid #c33;
+            }}
+            
+            .login-btn {{
                 width: 100%;
                 padding: 12px;
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 color: white;
                 border: none;
-                border-radius: 6px;
-                font-size: 16px;
+                border-radius: 5px;
                 font-weight: 600;
                 cursor: pointer;
-                transition: transform 0.2s;
+                transition: transform 0.2s, box-shadow 0.2s;
             }}
             
-            button:hover {{
+            .login-btn:hover {{
                 transform: translateY(-2px);
+                box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
             }}
             
-            button:active {{
+            .login-btn:active {{
                 transform: translateY(0);
             }}
         </style>
     </head>
     <body>
         <div class="login-container">
-            <h1>🔐 Login</h1>
-            <p class="subtitle">Calendar Management System</p>
+            <div class="login-header">
+                <h1>🔐 Login</h1>
+                <p>Calendar Management System</p>
+            </div>
             
             {error_msg}
             
-            <form method="POST">
+            <form method="POST" action="/login">
                 <div class="form-group">
                     <label for="username">Utilizador</label>
-                    <input type="text" id="username" name="username" required autofocus>
+                    <input 
+                        type="text" 
+                        id="username" 
+                        name="username" 
+                        required 
+                        autofocus
+                        autocomplete="username"
+                    >
                 </div>
                 
                 <div class="form-group">
                     <label for="password">Password</label>
-                    <input type="password" id="password" name="password" required>
+                    <input 
+                        type="password" 
+                        id="password" 
+                        name="password" 
+                        required
+                        autocomplete="current-password"
+                    >
                 </div>
                 
-                <button type="submit">Entrar →</button>
+                <button type="submit" class="login-btn">Entrar →</button>
             </form>
         </div>
     </body>
@@ -718,20 +740,13 @@ if __name__ == '__main__':
     log_info(f"Starting Flask server on port {PORT}")
     log_info(f"Environment: {FLASK_ENV}")
     log_info(f"Authentication: ENABLED")
-    log_info(f"Secret Key: {'Custom' if os.getenv('FLASK_SECRET_KEY') else 'Default (DEV ONLY)'}")
+    log_info(f"Secret Key: {'Custom' if os.getenv('FLASK_SECRET_KEY') else 'Generated'}")
     log_info(f"Repository Path: {REPO_PATH}")
-    
-    # Create log file if it doesn't exist
-    log_file = os.path.join(REPO_PATH, 'sync.log')
-    if not os.path.exists(log_file):
-        Path(log_file).touch()
-    
-    # Create static directory if it doesn't exist
+
+    # Create directories if they don't exist
     static_dir = os.path.join(os.path.dirname(__file__), 'static')
-    if not os.path.exists(static_dir):
-        os.makedirs(static_dir)
-        log_info(f"Created static directory: {static_dir}")
-    
+    os.makedirs(static_dir, exist_ok=True)
+
     app.run(
         host='0.0.0.0',
         port=PORT,

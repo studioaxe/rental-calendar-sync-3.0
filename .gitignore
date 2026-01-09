@@ -24,6 +24,8 @@ ENV/
 .vscode/
 .idea/
 *.swp
+*.swo
+*~
 
 # OS
 .DS_Store
@@ -31,3 +33,15 @@ Thumbs.db
 
 # Generated files
 import_calendar.ics
+data/
+*.ics
+
+# Python
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+
+# Local development
+.env.local
+.env.*.local

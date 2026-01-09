@@ -1,0 +1,53 @@
+services:
+  - type: web
+    name: rental-calendar-sync
+    env: python
+    plan: free
+    
+    buildCommand: >
+      pip install -r requirements.txt &&
+      mkdir -p /opt/render/project/src/static &&
+      cp manual_calendar.html /opt/render/project/src/static/ 2>/dev/null || true
+    
+    startCommand: >
+      gunicorn --workers 2 --worker-class sync --bind 0.0.0.0:$PORT app_fase3:app
+    
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      
+      - key: FLASK_SECRET_KEY
+        sync: false
+      
+      - key: PORT
+        value: "5000"
+      
+      - key: HOST
+        value: 0.0.0.0
+      
+      - key: WEB_USERNAME
+        sync: false
+      
+      - key: WEB_PASSWORD
+        sync: false
+      
+      - key: REPO_PATH
+        value: /opt/render/project/src
+      
+      - key: BASE_URL
+        value: https://rentalcalendarsync.onrender.com
+      
+      - key: CORS_ORIGINS
+        value: rentalcalendarsync.onrender.com,localhost,127.0.0.1
+      
+      - key: LOG_LEVEL
+        value: INFO
+      
+      - key: FLASK_DEBUG
+        value: "0"
+    
+    rootDir: rental-calendar-sync-3.0
+    
+    autoDeploy: true
+    
+    healthCheckPath: /api/health
