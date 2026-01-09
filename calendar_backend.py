@@ -1,29 +1,10 @@
-# 🔐 SISTEMA DE LOGIN + REDIRECIONAMENTO
-
-## 📋 REQUISITOS
-
-1. **GET `/`** → Redireciona para `/login` (se não autenticado)
-2. **GET `/login`** → Mostra página de login
-3. **POST `/login`** → Autentica + Redireciona para `/manual_calendar`
-4. **GET `/manual_calendar`** → Protegida (requer login) + Serve HTML
-5. **GET `/logout`** → Limpa sessão + Redireciona para `/login`
-
----
-
-## ✅ SOLUÇÃO COMPLETA
-
-### PASSO 1: Atualizar `calendar_backend.py`
-
-Substitua a versão atual por esta com login integrado:
-
-```python
 """
 Manual Calendar Editor - Backend API - Fase 3.1.2
 
 Flask server with login, authentication, and calendar management
 
 Version: 3.1.2
-Date: January 8, 2026
+Date: January 9, 2026
 """
 
 from flask import Flask, jsonify, request, send_file, send_from_directory, redirect, session, url_for
@@ -46,8 +27,8 @@ load_dotenv()
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 CORS(app)
 
-# ⭐ IMPORTANTE: Definir secret key para sessões
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'flask-dev-secret-key-change-in-prod')
+# ⭐ IMPORTANTE: Usar FLASK_SECRET_KEY (sem expor valor real!)
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'dev-secret-key-change-in-production')
 
 # Configuration
 REPO_PATH = os.getenv('REPO_PATH', '.')
@@ -55,9 +36,9 @@ PORT = int(os.getenv('PORT', 5000))
 FLASK_ENV = os.getenv('FLASK_ENV', 'development')
 CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'localhost,127.0.0.1')
 
-# Credenciais de login (simplificado - usar base de dados em produção)
+# Credenciais de login - valores vêm de environment, não do código!
 ADMIN_USERNAME = os.getenv('WEB_USERNAME', 'admin')
-ADMIN_PASSWORD = os.getenv('WEB_PASSWORD', 'adm123123!')
+ADMIN_PASSWORD = os.getenv('WEB_PASSWORD', 'admin123')
 
 # File paths
 IMPORT_CALENDAR_PATH = os.path.join(REPO_PATH, 'import_calendar.ics')
@@ -98,6 +79,77 @@ def file_exists(filepath):
 def is_authenticated():
     """Check if user is authenticated"""
     return session.get('authenticated', False)
+
+def read_ics_file(filepath):
+    """Read and parse ICS file"""
+    try:
+        if not file_exists(filepath):
+            return None
+        
+        with open(filepath, 'rb') as f:
+            cal = Calendar.from_ical(f.read())
+            events = []
+            
+            for component in cal.walk():
+                if component.name == "VEVENT":
+                    event = {
+                        'uid': str(component.get('uid', '')),
+                        'summary': str(component.get('summary', '')),
+                        'dtstart': component.get('dtstart'),
+                        'dtend': component.get('dtend'),
+                        'description': str(component.get('description', '')),
+                        'categories': str(component.get('categories', '')),
+                        'status': str(component.get('status', 'CONFIRMED'))
+                    }
+                    
+                    # Convert dates to strings
+                    if event['dtstart']:
+                        event['dtstart'] = event['dtstart'].dt.isoformat() if hasattr(event['dtstart'].dt, 'isoformat') else str(event['dtstart'].dt)
+                    if event['dtend']:
+                        event['dtend'] = event['dtend'].dt.isoformat() if hasattr(event['dtend'].dt, 'isoformat') else str(event['dtend'].dt)
+                    
+                    events.append(event)
+            
+            return events
+    
+    except Exception as e:
+        log_error(f"Error reading ICS file {filepath}: {str(e)}")
+        return None
+
+def save_manual_events(events):
+    """Save manual events to manual_calendar.ics"""
+    try:
+        cal = Calendar()
+        cal.add('prodid', '-//Rental Manual Calendar//PT')
+        cal.add('version', '2.0')
+        cal.add('calscale', 'GREGORIAN')
+        cal.add('x-wr-calname', 'Manual Calendar Events')
+        cal.add('x-wr-timezone', 'Europe/Lisbon')
+        
+        for event_data in events:
+            from icalendar import Event
+            event = Event()
+            event.add('summary', event_data.get('summary', 'Manual Event'))
+            event.add('dtstart', event_data.get('dtstart'))
+            event.add('dtend', event_data.get('dtend'))
+            event.add('uid', event_data.get('uid', f"manual-{datetime.now().timestamp()}@rental-calendar.com"))
+            event.add('categories', event_data.get('categories', 'MANUAL'))
+            event.add('description', event_data.get('description', ''))
+            event.add('status', event_data.get('status', 'CONFIRMED'))
+            event.add('transp', 'TRANSPARENT')
+            event.add('created', datetime.now())
+            cal.add_component(event)
+        
+        # Write to file
+        with open(MANUAL_CALENDAR_PATH, 'wb') as f:
+            f.write(cal.to_ical())
+        
+        log_info(f"Saved {len(events)} manual events to {MANUAL_CALENDAR_PATH}")
+        return True
+    
+    except Exception as e:
+        log_error(f"Error saving manual events: {str(e)}")
+        return False
 
 # ============================================================================
 # AUTHENTICATION ROUTES
@@ -265,6 +317,196 @@ def sync_calendars():
     except Exception as e:
         log_error(f"Sync error: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/calendar/master', methods=['GET'])
+def load_master_calendar():
+    """Load master_calendar.ics"""
+    
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+    
+    try:
+        if not file_exists(MASTER_CALENDAR_PATH):
+            return jsonify({
+                'status': 'error',
+                'message': 'Master calendar not found',
+                'events': []
+            }), 404
+        
+        events = read_ics_file(MASTER_CALENDAR_PATH)
+        return jsonify({
+            'status': 'success',
+            'file': 'master_calendar.ics',
+            'events': events or [],
+            'count': len(events) if events else 0,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+    
+    except Exception as e:
+        log_error(f"Error loading master calendar: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'events': []
+        }), 500
+
+@app.route('/api/calendar/import', methods=['GET'])
+def load_import_calendar():
+    """Load import_calendar.ics"""
+    
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+    
+    try:
+        if not file_exists(IMPORT_CALENDAR_PATH):
+            return jsonify({
+                'status': 'error',
+                'message': 'Import calendar not found',
+                'events': []
+            }), 404
+        
+        events = read_ics_file(IMPORT_CALENDAR_PATH)
+        return jsonify({
+            'status': 'success',
+            'file': 'import_calendar.ics',
+            'events': events or [],
+            'count': len(events) if events else 0,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+    
+    except Exception as e:
+        log_error(f"Error loading import calendar: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'events': []
+        }), 500
+
+@app.route('/api/calendar/manual', methods=['GET'])
+def load_manual_calendar():
+    """Load manual_calendar.ics"""
+    
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+    
+    try:
+        if not file_exists(MANUAL_CALENDAR_PATH):
+            return jsonify({
+                'status': 'success',
+                'file': 'manual_calendar.ics',
+                'events': [],
+                'count': 0,
+                'message': 'No manual events yet',
+                'timestamp': datetime.now().isoformat()
+            }), 200
+        
+        events = read_ics_file(MANUAL_CALENDAR_PATH)
+        return jsonify({
+            'status': 'success',
+            'file': 'manual_calendar.ics',
+            'events': events or [],
+            'count': len(events) if events else 0,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+    
+    except Exception as e:
+        log_error(f"Error loading manual calendar: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'events': []
+        }), 500
+
+@app.route('/api/calendar/save-manual', methods=['POST'])
+def save_manual_calendar():
+    """Save manual events"""
+    
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+    
+    try:
+        data = request.get_json()
+        if not data or 'events' not in data:
+            return jsonify({
+                'status': 'error',
+                'message': 'No events provided'
+            }), 400
+        
+        events = data['events']
+        
+        # Save events to ICS file
+        success = save_manual_events(events)
+        
+        if not success:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to save events'
+            }), 500
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Manual events saved',
+            'events_saved': len(events),
+            'timestamp': datetime.now().isoformat()
+        }), 200
+    
+    except Exception as e:
+        log_error(f"Error saving manual calendar: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/calendar/status', methods=['GET'])
+def calendar_status():
+    """Get status of calendar files"""
+    
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+    
+    try:
+        status = {
+            'import_calendar': {
+                'exists': file_exists(IMPORT_CALENDAR_PATH),
+                'path': IMPORT_CALENDAR_PATH
+            },
+            'master_calendar': {
+                'exists': file_exists(MASTER_CALENDAR_PATH),
+                'path': MASTER_CALENDAR_PATH
+            },
+            'manual_calendar': {
+                'exists': file_exists(MANUAL_CALENDAR_PATH),
+                'path': MANUAL_CALENDAR_PATH
+            },
+            'sync_script': {
+                'exists': file_exists(SYNC_SCRIPT_PATH),
+                'path': SYNC_SCRIPT_PATH
+            }
+        }
+        
+        # Get file sizes if they exist
+        for key in status:
+            if status[key]['exists']:
+                try:
+                    size = os.path.getsize(status[key]['path'])
+                    status[key]['size_bytes'] = size
+                    status[key]['size_kb'] = round(size / 1024, 2)
+                except:
+                    pass
+        
+        return jsonify({
+            'status': 'success',
+            'repo_path': REPO_PATH,
+            'files': status,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+    
+    except Exception as e:
+        log_error(f"Error getting status: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 # ============================================================================
 # ERROR HANDLERS
@@ -449,10 +691,6 @@ def login_html(error=None):
                     Entrar →
                 </button>
             </form>
-            
-            <div class="info-box">
-                Demo: username=<strong>admin</strong> password=<strong>admin123</strong>
-            </div>
         </div>
     </body>
     </html>
@@ -466,7 +704,7 @@ if __name__ == '__main__':
     log_info(f"Starting Flask server on port {PORT}")
     log_info(f"Environment: {FLASK_ENV}")
     log_info(f"Authentication: ENABLED")
-    log_info(f"Secret Key: {'Custom' if os.getenv('SECRET_KEY') else 'Default (DEV ONLY)'}")
+    log_info(f"Secret Key: {'Custom' if os.getenv('FLASK_SECRET_KEY') else 'Default (DEV ONLY)'}")
     
     # Create log file if it doesn't exist
     log_file = os.path.join(REPO_PATH, 'sync.log')
@@ -478,265 +716,3 @@ if __name__ == '__main__':
         port=PORT,
         debug=(FLASK_ENV == 'development')
     )
-```
-
----
-
-### PASSO 2: Atualizar `.env`
-
-Adicione estas variáveis:
-
-```bash
-# Autenticação
-SECRET_KEY=seu-secret-key-muito-seguro-mudado-em-producao
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin123
-```
-
----
-
-### PASSO 3: Criar o ficheiro `static/manual_calendar.html`
-
-Use o HTML fornecido anteriormente em `DIAGNOSTICO_REAL.md` ou crie um básico:
-
-```html
-<!DOCTYPE html>
-<html lang="pt">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>📅 Manual Calendar Editor</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #f5f5f5;
-        }
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .header h1 { font-size: 24px; }
-        .header a {
-            color: white;
-            background: rgba(255,255,255,0.2);
-            padding: 8px 16px;
-            border-radius: 4px;
-            text-decoration: none;
-            cursor: pointer;
-        }
-        .header a:hover { background: rgba(255,255,255,0.3); }
-        .container {
-            max-width: 1200px;
-            margin: 20px auto;
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        h2 { color: #333; margin: 20px 0 10px; }
-        button {
-            background: #667eea;
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            margin: 10px 5px 10px 0;
-        }
-        button:hover { background: #764ba2; }
-        .event-item {
-            background: #f9f9f9;
-            padding: 10px;
-            margin: 10px 0;
-            border-left: 4px solid #667eea;
-            border-radius: 4px;
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>📅 Manual Calendar Editor</h1>
-        <a href="/logout">Logout →</a>
-    </div>
-    
-    <div class="container">
-        <h2>Bem-vindo ao Calendar Management System!</h2>
-        <p>Gerencie eventos de calendário facilmente.</p>
-        
-        <h2>Ações Disponíveis</h2>
-        <button onclick="loadMasterCalendar()">📥 Master Calendar</button>
-        <button onclick="loadImportCalendar()">📥 Import Calendar</button>
-        <button onclick="syncCalendars()">🔄 Sincronizar</button>
-        <button onclick="loadStatus()">📊 Status</button>
-        
-        <h2>Eventos</h2>
-        <div id="events-container">
-            <p>Clique num botão acima para carregar eventos.</p>
-        </div>
-    </div>
-    
-    <script>
-        async function loadMasterCalendar() {
-            try {
-                const res = await fetch('/api/calendar/master');
-                const data = await res.json();
-                displayEvents(data, 'Master Calendar');
-            } catch(e) { alert('Erro: ' + e.message); }
-        }
-        
-        async function loadImportCalendar() {
-            try {
-                const res = await fetch('/api/calendar/import');
-                const data = await res.json();
-                displayEvents(data, 'Import Calendar');
-            } catch(e) { alert('Erro: ' + e.message); }
-        }
-        
-        async function syncCalendars() {
-            try {
-                const res = await fetch('/api/calendar/sync');
-                const data = await res.json();
-                alert(data.status === 'success' ? '✅ Sincronizado!' : '❌ Erro: ' + data.message);
-            } catch(e) { alert('Erro: ' + e.message); }
-        }
-        
-        async function loadStatus() {
-            try {
-                const res = await fetch('/api/calendar/status');
-                const data = await res.json();
-                document.getElementById('events-container').innerHTML = 
-                    '<pre>' + JSON.stringify(data.files, null, 2) + '</pre>';
-            } catch(e) { alert('Erro: ' + e.message); }
-        }
-        
-        function displayEvents(data, title) {
-            let html = `<h3>${title}</h3>`;
-            if(data.events && data.events.length > 0) {
-                html += `<p>Total: ${data.count} eventos</p>`;
-                data.events.forEach(e => {
-                    html += `<div class="event-item">
-                        <strong>${e.summary}</strong><br>
-                        ${e.dtstart} até ${e.dtend}
-                    </div>`;
-                });
-            } else {
-                html += '<p>Nenhum evento.</p>';
-            }
-            document.getElementById('events-container').innerHTML = html;
-        }
-    </script>
-</body>
-</html>
-```
-
----
-
-### PASSO 4: Git push
-
-```bash
-cd d:\Projetos\rent\rental-calendar-sync-3_0
-
-# Atualizar backend
-copy calendar_backend_v312.py calendar_backend.py
-
-# Criar pasta static (se não existir)
-mkdir static
-
-# Criar ficheiro HTML
-# (Colar o HTML acima num ficheiro static\manual_calendar.html)
-
-# Git
-git add .
-git commit -m "🔐 Add: Authentication system v3.1.2 + manual_calendar.html"
-git pushf
-```
-
----
-
-## 📊 FLUXO DE REDIRECIONAMENTO
-
-```
-Visitante acessa: https://rentalcalendarsync.onrender.com/
-    ↓
-    ❌ Não autenticado
-    ↓
-Redireciona para: /login
-    ↓
-Mostra página de login ✅
-    ↓
-Utilizador faz login (admin/admin123)
-    ↓
-    ✅ Credenciais correctas
-    ↓
-Redireciona para: /manual_calendar  ⭐ (em vez de /dashboard)
-    ↓
-Mostra manual_calendar.html ✅
-    ↓
-Utilizador clica "Logout"
-    ↓
-Limpa sessão + Redireciona para /login ✅
-```
-
----
-
-## 🔒 PROTECÇÕES
-
-- ✅ Sessões protegidas (secret key em .env)
-- ✅ Todas as rotas (excepto login) requerem autenticação
-- ✅ Ficheiros estáticos protegidos
-- ✅ APIs protegidas (@api/calendar/*)
-- ✅ Logout limpa a sessão
-
----
-
-## 📝 VARIÁVEIS .ENV
-
-```
-SECRET_KEY=seu-secret-muito-seguro
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin123
-```
-
----
-
-## ✅ TESTES
-
-Depois de implementar:
-
-```
-1. Aceder a https://rentalcalendarsync.onrender.com/
-   → Redireciona para /login ✅
-
-2. Aceder a https://rentalcalendarsync.onrender.com/manual_calendar
-   → Redireciona para /login (não autenticado) ✅
-
-3. Login com admin/admin123
-   → Redireciona para /manual_calendar ✅
-
-4. Clicar Logout
-   → Redireciona para /login ✅
-   → Sessão limpa ✅
-
-5. /api/calendar/* sem autenticação
-   → Retorna 401 Unauthorized ✅
-```
-
----
-
-## 🎯 RESUMO
-
-| Item | Status |
-|------|--------|
-| **Rota / → login** | ✅ Implementado |
-| **Página login** | ✅ Implementado |
-| **Redireção após login → /manual_calendar** | ✅ Implementado |
-| **Ficheiro manual_calendar.html** | ✅ Fornecido |
-| **Logout** | ✅ Implementado |
-| **Protecção de rotas** | ✅ Implementado |
-
-**Pronto! Sistema de autenticação completo! 🔐**
